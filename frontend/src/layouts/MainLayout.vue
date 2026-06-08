@@ -93,6 +93,7 @@ const menuItems = computed(() => [
   { to: '/flowers', title: '花材管理', icon: 'mdi-flower-outline' },
   { to: '/records', title: '业务记录', icon: 'mdi-clipboard-list-outline' },
   { to: '/trace', title: '操作轨迹', icon: 'mdi-history' },
+  { to: '/performance', title: '绩效与责任追踪', icon: 'mdi-account-tie-outline' },
 ])
 
 async function loadWarningCount() {

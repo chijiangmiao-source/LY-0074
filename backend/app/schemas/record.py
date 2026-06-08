@@ -23,6 +23,7 @@ class BucketInCreate(BaseModel):
     bucket_id: str
     flower_id: str
     quantity: int
+    batch_no: Optional[str] = None
     operator: Optional[str] = None
     remark: Optional[str] = None
 
@@ -32,6 +33,7 @@ class BucketInResponse(BaseModel):
     bucket: BucketInfo
     flower: FlowerInfo
     quantity: int
+    batch_no: Optional[str] = None
     operator: Optional[str] = None
     remark: Optional[str] = None
     created_at: datetime
@@ -44,6 +46,7 @@ class BucketOutCreate(BaseModel):
     bucket_id: str
     flower_id: str
     quantity: int
+    batch_no: Optional[str] = None
     operator: Optional[str] = None
     remark: Optional[str] = None
 
@@ -53,6 +56,7 @@ class BucketOutResponse(BaseModel):
     bucket: BucketInfo
     flower: FlowerInfo
     quantity: int
+    batch_no: Optional[str] = None
     operator: Optional[str] = None
     remark: Optional[str] = None
     created_at: datetime
@@ -86,6 +90,7 @@ class PreservationResponse(BaseModel):
 class LossCreate(BaseModel):
     flower_id: str
     quantity: int
+    batch_no: Optional[str] = None
     reason: Optional[str] = None
     operator: Optional[str] = None
     remark: Optional[str] = None
@@ -96,6 +101,7 @@ class LossResponse(BaseModel):
     flower: FlowerInfo
     store: Optional[StoreInfo] = None
     quantity: int
+    batch_no: Optional[str] = None
     reason: Optional[str] = None
     operator: Optional[str] = None
     remark: Optional[str] = None

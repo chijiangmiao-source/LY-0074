@@ -46,26 +46,35 @@ async def get_user_store(user: User) -> Optional[Store]:
 
 
 async def calculate_workload(
-    operator_name: str,
     user_id: Optional[str],
     date_query: Optional[Dict[str, Any]],
     store_id: Optional[str] = None,
 ) -> Dict[str, int]:
-    in_query = {}
-    out_query = {}
-    pres_query = {}
-    loss_query = {}
+    if not user_id:
+        return {
+            "in_bucket_count": 0,
+            "out_bucket_count": 0,
+            "preservation_count": 0,
+            "loss_count": 0,
+            "warning_handled_count": 0,
+            "inspection_count": 0,
+            "total_operations": 0,
+        }
+
+    uid = ObjectId(user_id)
+    user = await User.get(uid)
+    operator_name = (user.full_name or user.username) if user else ""
+
+    in_query = {"operator_id": uid}
+    out_query = {"operator_id": uid}
+    pres_query = {"operator_id": uid}
+    loss_query = {"operator_id": uid}
 
     if date_query:
         in_query["created_at"] = date_query
         out_query["created_at"] = date_query
         pres_query["created_at"] = date_query
         loss_query["created_at"] = date_query
-
-    in_query["operator"] = operator_name
-    out_query["operator"] = operator_name
-    pres_query["operator"] = operator_name
-    loss_query["operator"] = operator_name
 
     if store_id:
         pres_query["store"] = ObjectId(store_id)
@@ -76,23 +85,40 @@ async def calculate_workload(
     pres_count = await PreservationRecord.find(pres_query).count()
     loss_count = await LossRecord.find(loss_query).count()
 
+    if not in_count and operator_name:
+        fallback_in = dict(in_query)
+        del fallback_in["operator_id"]
+        fallback_in["operator"] = operator_name
+        in_count = await BucketInRecord.find(fallback_in).count()
+    if not out_count and operator_name:
+        fallback_out = dict(out_query)
+        del fallback_out["operator_id"]
+        fallback_out["operator"] = operator_name
+        out_count = await BucketOutRecord.find(fallback_out).count()
+    if not pres_count and operator_name:
+        fallback_pres = dict(pres_query)
+        del fallback_pres["operator_id"]
+        fallback_pres["operator"] = operator_name
+        pres_count = await PreservationRecord.find(fallback_pres).count()
+    if not loss_count and operator_name:
+        fallback_loss = dict(loss_query)
+        del fallback_loss["operator_id"]
+        fallback_loss["operator"] = operator_name
+        loss_count = await LossRecord.find(fallback_loss).count()
+
     warning_query = {}
     if date_query:
         warning_query["handled_at"] = date_query
-    if user_id:
-        warning_query["handler"] = ObjectId(user_id)
+    warning_query["handler"] = uid
     warning_count = await Warning.find(warning_query).count()
 
-    inspection_count = 0
-    if user_id:
-        status_query = {}
-        status_query["operator"] = ObjectId(user_id)
-        if date_query:
-            status_query["created_at"] = date_query
-        status_query["target_type"] = {
-            "$in": [StatusChangeTarget.BUCKET_STATUS, StatusChangeTarget.FLOWER_PRESERVATION]
-        }
-        inspection_count = await StatusChangeRecord.find(status_query).count()
+    status_query = {"operator": uid}
+    if date_query:
+        status_query["created_at"] = date_query
+    status_query["target_type"] = {
+        "$in": [StatusChangeTarget.BUCKET_STATUS, StatusChangeTarget.FLOWER_PRESERVATION]
+    }
+    inspection_count = await StatusChangeRecord.find(status_query).count()
 
     total = in_count + out_count + pres_count + loss_count + warning_count + inspection_count
 
@@ -144,12 +170,22 @@ async def calculate_timeliness(
 
 
 async def calculate_loss_stats(
-    operator_name: str,
+    user_id: Optional[str],
     date_query: Optional[Dict[str, Any]],
     store_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    loss_query = {}
-    loss_query["operator"] = operator_name
+    if not user_id:
+        return {
+            "total_loss_quantity": 0,
+            "responsible_loss_quantity": 0,
+            "loss_rate": 0.0,
+        }
+
+    uid = ObjectId(user_id)
+    user = await User.get(uid)
+    operator_name = (user.full_name or user.username) if user else ""
+
+    loss_query = {"operator_id": uid}
     if date_query:
         loss_query["created_at"] = date_query
     if store_id:
@@ -157,6 +193,13 @@ async def calculate_loss_stats(
 
     loss_records = await LossRecord.find(loss_query).to_list()
     responsible_qty = sum(r.quantity for r in loss_records)
+
+    if not responsible_qty and operator_name:
+        fallback_loss = dict(loss_query)
+        del fallback_loss["operator_id"]
+        fallback_loss["operator"] = operator_name
+        fallback_records = await LossRecord.find(fallback_loss).to_list()
+        responsible_qty = sum(r.quantity for r in fallback_records)
 
     all_loss_query = {}
     if date_query:
@@ -193,11 +236,10 @@ async def get_employee_performance(
     store_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     date_query = build_date_query(start_date, end_date)
-    operator_name = user.full_name or user.username
 
-    workload = await calculate_workload(operator_name, str(user.id), date_query, store_id)
+    workload = await calculate_workload(str(user.id), date_query, store_id)
     timeliness = await calculate_timeliness(str(user.id), date_query)
-    loss_stats = await calculate_loss_stats(operator_name, date_query, store_id)
+    loss_stats = await calculate_loss_stats(str(user.id), date_query, store_id)
     score = calculate_performance_score(workload, timeliness, loss_stats)
 
     user_store = store_id
@@ -295,6 +337,7 @@ TARGET_TYPE_LABEL_MAP = {
 def trace_to_response(trace: ResponsibilityTrace) -> Dict[str, Any]:
     data = trace.model_dump(by_alias=True)
     data["_id"] = str(trace.id)
+    data["batch_no"] = trace.batch_no
     data["target_type_label"] = TARGET_TYPE_LABEL_MAP.get(trace.target_type, trace.target_type.value)
     data["action_label"] = ACTION_LABEL_MAP.get(trace.action, trace.action.value)
     data["operator_position_label"] = POSITION_LABELS.get(trace.operator_position, "") if trace.operator_position else ""
@@ -380,6 +423,7 @@ async def get_responsibility_trace(
                 "id": str(flower.id),
                 "flower_code": flower.flower_code,
                 "flower_name": flower.flower_name,
+                "batch_no": flower.batch_no,
                 "current_quantity": flower.current_quantity,
                 "preservation_status": flower.preservation_status.value if hasattr(flower.preservation_status, 'value') else str(flower.preservation_status),
                 "store_name": store_name,
@@ -420,10 +464,12 @@ async def add_responsibility_trace(
     bucket: Optional[Bucket] = None,
     flower=None,
     warning: Optional[Warning] = None,
+    batch_no: Optional[str] = None,
 ) -> ResponsibilityTrace:
     trace = ResponsibilityTrace(
         target_type=target_type,
         target_id=target_id,
+        batch_no=batch_no,
         store=store,
         bucket=bucket,
         flower=flower,
@@ -437,6 +483,50 @@ async def add_responsibility_trace(
     )
     await trace.create()
     return trace
+
+
+async def get_responsibility_trace_by_batch(batch_no: str) -> Dict[str, Any]:
+    if not batch_no:
+        return {
+            "batch_no": "",
+            "target_type": "batch",
+            "target_type_label": "批次",
+            "target_id": "",
+            "target_info": {},
+            "traces": [],
+            "total": 0,
+        }
+
+    traces = await ResponsibilityTrace.find(
+        ResponsibilityTrace.batch_no == batch_no,
+        fetch_links=True,
+    ).sort("created_at").to_list()
+
+    batch_flowers = await Flower.find(Flower.batch_no == batch_no).to_list()
+    flower_infos = []
+    for f in batch_flowers:
+        flower_infos.append({
+            "id": str(f.id),
+            "flower_code": f.flower_code,
+            "flower_name": f.flower_name,
+            "current_quantity": f.current_quantity,
+        })
+
+    target_info = {
+        "batch_no": batch_no,
+        "flower_count": len(flower_infos),
+        "flowers": flower_infos,
+    }
+
+    return {
+        "batch_no": batch_no,
+        "target_type": "batch",
+        "target_type_label": "批次",
+        "target_id": batch_no,
+        "target_info": target_info,
+        "traces": [trace_to_response(t) for t in traces],
+        "total": len(traces),
+    }
 
 
 async def get_performance_summary(

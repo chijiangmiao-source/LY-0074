@@ -121,19 +121,28 @@ async def create_bucket_in(
     await flower.save()
 
     operator_name = record_in.operator or current_user.full_name or current_user.username
+    batch_no = record_in.batch_no or flower.batch_no
     record = BucketInRecord(
         bucket=bucket,
         flower=flower,
         quantity=record_in.quantity,
+        batch_no=batch_no,
         operator=operator_name,
+        operator_id=current_user,
         remark=record_in.remark,
     )
     await record.create()
+
+    if batch_no and not flower.batch_no:
+        flower.batch_no = batch_no
+        flower.updated_at = datetime.utcnow()
+        await flower.save()
 
     store = bucket.store if isinstance(bucket.store, Store) else None
     await add_responsibility_trace(
         target_type=ResponsibilityTargetType.BUCKET,
         target_id=str(bucket.id),
+        batch_no=batch_no,
         action=ResponsibilityAction.IN_BUCKET,
         user=current_user,
         operator_name=operator_name,
@@ -145,6 +154,7 @@ async def create_bucket_in(
     await add_responsibility_trace(
         target_type=ResponsibilityTargetType.FLOWER,
         target_id=str(flower.id),
+        batch_no=batch_no,
         action=ResponsibilityAction.IN_BUCKET,
         user=current_user,
         operator_name=operator_name,
@@ -186,11 +196,14 @@ async def create_bucket_out(
     await flower.save()
 
     operator_name = record_in.operator or current_user.full_name or current_user.username
+    batch_no = record_in.batch_no or flower.batch_no
     record = BucketOutRecord(
         bucket=bucket,
         flower=flower,
         quantity=record_in.quantity,
+        batch_no=batch_no,
         operator=operator_name,
+        operator_id=current_user,
         remark=record_in.remark,
     )
     await record.create()
@@ -203,6 +216,7 @@ async def create_bucket_out(
     await add_responsibility_trace(
         target_type=ResponsibilityTargetType.BUCKET,
         target_id=str(bucket.id),
+        batch_no=batch_no,
         action=ResponsibilityAction.OUT_BUCKET,
         user=current_user,
         operator_name=operator_name,
@@ -214,6 +228,7 @@ async def create_bucket_out(
     await add_responsibility_trace(
         target_type=ResponsibilityTargetType.FLOWER,
         target_id=str(flower.id),
+        batch_no=batch_no,
         action=ResponsibilityAction.OUT_BUCKET,
         user=current_user,
         operator_name=operator_name,
@@ -253,6 +268,7 @@ async def create_preservation(
         previous_quantity=previous_quantity,
         after_quantity=after_quantity,
         operator=operator_name,
+        operator_id=current_user,
         remark=record_in.remark,
     )
     await record.create()
@@ -291,12 +307,15 @@ async def create_loss(
     store = flower.store if isinstance(flower.store, Store) else None
 
     operator_name = record_in.operator or current_user.full_name or current_user.username
+    batch_no = record_in.batch_no or flower.batch_no
     record = LossRecord(
         flower=flower,
         store=store,
         quantity=record_in.quantity,
+        batch_no=batch_no,
         reason=record_in.reason,
         operator=operator_name,
+        operator_id=current_user,
         remark=record_in.remark,
     )
     await record.create()
@@ -304,6 +323,7 @@ async def create_loss(
     await add_responsibility_trace(
         target_type=ResponsibilityTargetType.FLOWER,
         target_id=str(flower.id),
+        batch_no=batch_no,
         action=ResponsibilityAction.LOSS,
         user=current_user,
         operator_name=operator_name,

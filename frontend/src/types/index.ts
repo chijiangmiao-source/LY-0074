@@ -3,6 +3,8 @@ export interface User {
   username: string
   email?: string
   full_name?: string
+  position?: string
+  position_label?: string
   is_active: boolean
   is_admin: boolean
   created_at: string
@@ -178,4 +180,102 @@ export interface OperationTrace {
   remark: string
   detail: string
   created_at: string
+}
+
+export interface PositionInfo {
+  code: string
+  label: string
+}
+
+export interface UserSimpleInfo {
+  id: string
+  username: string
+  full_name?: string
+  position?: string
+  position_label?: string
+}
+
+export interface StoreSimpleInfo {
+  id: string
+  store_name: string
+  store_code?: string
+}
+
+export interface WorkloadStats {
+  in_bucket_count: number
+  out_bucket_count: number
+  preservation_count: number
+  loss_count: number
+  warning_handled_count: number
+  inspection_count: number
+  total_operations: number
+}
+
+export interface TimelinessStats {
+  on_time_count: number
+  overdue_count: number
+  on_time_rate: number
+  avg_warning_handle_hours: number
+}
+
+export interface LossStats {
+  total_loss_quantity: number
+  responsible_loss_quantity: number
+  loss_rate: number
+}
+
+export interface EmployeePerformance {
+  user: UserSimpleInfo
+  store?: StoreSimpleInfo
+  workload: WorkloadStats
+  timeliness: TimelinessStats
+  loss: LossStats
+  score: number
+  rank?: number
+}
+
+export interface PerformanceRankingResponse {
+  items: EmployeePerformance[]
+  total: number
+  period_start: string
+  period_end: string
+}
+
+export interface ResponsibilityTraceItem {
+  _id: string
+  target_type: string
+  target_type_label: string
+  target_id: string
+  batch_no?: string
+  action: string
+  action_label: string
+  operator?: UserSimpleInfo
+  operator_name?: string
+  operator_position?: string
+  operator_position_label?: string
+  store?: StoreSimpleInfo
+  bucket?: { id: string; bucket_code: string }
+  flower?: { id: string; flower_name: string; flower_code: string }
+  warning?: { id: string; warning_type: string; message: string }
+  remark?: string
+  created_at: string
+}
+
+export interface ResponsibilityTraceResponse {
+  target_type: string
+  target_type_label: string
+  target_id: string
+  batch_no?: string
+  target_info: Record<string, any>
+  traces: ResponsibilityTraceItem[]
+  total: number
+}
+
+export interface PerformanceSummary {
+  period_start: string
+  period_end: string
+  total_employees: number
+  total_operations: number
+  avg_on_time_rate: number
+  total_loss_quantity: number
 }

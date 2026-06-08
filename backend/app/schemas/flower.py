@@ -8,6 +8,7 @@ class FlowerBase(BaseModel):
     flower_code: str
     flower_name: str
     category_id: str
+    batch_no: Optional[str] = None
     bucket_id: Optional[str] = None
     store_id: Optional[str] = None
     current_quantity: int = 0
@@ -23,6 +24,7 @@ class FlowerCreate(FlowerBase):
 class FlowerUpdate(BaseModel):
     flower_name: Optional[str] = None
     category_id: Optional[str] = None
+    batch_no: Optional[str] = None
     bucket_id: Optional[str] = None
     store_id: Optional[str] = None
     current_quantity: Optional[int] = None
@@ -52,6 +54,7 @@ class FlowerResponse(BaseModel):
     flower_code: str
     flower_name: str
     category: CategoryInfo
+    batch_no: Optional[str] = None
     bucket: Optional[BucketInfo] = None
     store: Optional[StoreInfo] = None
     current_quantity: int

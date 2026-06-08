@@ -120,6 +120,7 @@ async def create_flower(
         flower_code=flower_in.flower_code,
         flower_name=flower_in.flower_name,
         category=category,
+        batch_no=flower_in.batch_no,
         bucket=bucket,
         store=store,
         current_quantity=flower_in.current_quantity,

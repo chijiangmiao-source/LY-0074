@@ -526,9 +526,11 @@ async def handle_warning(
         WarningStatus.RESOLVED: "已解决",
     }.get(req.status, req.status.value)
 
+    flower_batch = flower.batch_no if flower and hasattr(flower, 'batch_no') else None
     await add_responsibility_trace(
         target_type=ResponsibilityTargetType.WARNING,
         target_id=str(w.id),
+        batch_no=flower_batch,
         action=ResponsibilityAction.WARNING_HANDLE,
         user=current_user,
         remark=f"更新预警状态为{status_label}，备注：{req.note or '无'}",
@@ -541,6 +543,7 @@ async def handle_warning(
         await add_responsibility_trace(
             target_type=ResponsibilityTargetType.BUCKET,
             target_id=str(bucket.id),
+            batch_no=flower_batch,
             action=ResponsibilityAction.WARNING_HANDLE,
             user=current_user,
             remark=f"处理预警[{w.warning_type_label}]，状态：{status_label}",
@@ -553,6 +556,7 @@ async def handle_warning(
         await add_responsibility_trace(
             target_type=ResponsibilityTargetType.FLOWER,
             target_id=str(flower.id),
+            batch_no=flower_batch,
             action=ResponsibilityAction.WARNING_HANDLE,
             user=current_user,
             remark=f"处理预警[{w.warning_type_label}]，状态：{status_label}",

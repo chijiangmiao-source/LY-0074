@@ -56,6 +56,18 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Trace.vue'),
         meta: { title: '操作轨迹', icon: 'mdi-history' },
       },
+      {
+        path: 'performance',
+        name: 'Performance',
+        component: () => import('@/views/Performance.vue'),
+        meta: { title: '员工绩效与责任追踪', icon: 'mdi-account-tie' },
+      },
+      {
+        path: 'responsibility-trace',
+        name: 'ResponsibilityTrace',
+        component: () => import('@/views/ResponsibilityTrace.vue'),
+        meta: { title: '责任追踪详情', icon: 'mdi-account-clock-outline' },
+      },
     ],
   },
   { path: '/:pathMatch(.*)*', redirect: '/dashboard' },

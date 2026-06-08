@@ -6,6 +6,7 @@ from typing import Optional
 from app.models.bucket import Bucket
 from app.models.flower import Flower
 from app.models.store import Store
+from app.models.user import User
 
 
 class RecordType(str, Enum):
@@ -20,7 +21,9 @@ class BucketInRecord(Document):
     bucket: Link[Bucket]
     flower: Link[Flower]
     quantity: int
+    batch_no: Optional[str] = None
     operator: Optional[str] = None
+    operator_id: Optional[Link[User]] = None
     remark: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -33,7 +36,9 @@ class BucketOutRecord(Document):
     bucket: Link[Bucket]
     flower: Link[Flower]
     quantity: int
+    batch_no: Optional[str] = None
     operator: Optional[str] = None
+    operator_id: Optional[Link[User]] = None
     remark: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -49,6 +54,7 @@ class PreservationRecord(Document):
     previous_quantity: float
     after_quantity: float
     operator: Optional[str] = None
+    operator_id: Optional[Link[User]] = None
     remark: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -61,8 +67,10 @@ class LossRecord(Document):
     flower: Link[Flower]
     store: Optional[Link[Store]] = None
     quantity: int
+    batch_no: Optional[str] = None
     reason: Optional[str] = None
     operator: Optional[str] = None
+    operator_id: Optional[Link[User]] = None
     remark: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 

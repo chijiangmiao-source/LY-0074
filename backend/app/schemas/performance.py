@@ -67,6 +67,7 @@ class ResponsibilityTraceItem(BaseModel):
     target_type: str
     target_type_label: str
     target_id: str
+    batch_no: Optional[str] = None
     action: str
     action_label: str
     operator: Optional[UserSimpleInfo] = None

@@ -18,6 +18,7 @@ from app.services.performance import (
     get_performance_ranking,
     get_employee_performance,
     get_responsibility_trace,
+    get_responsibility_trace_by_batch,
     get_performance_summary,
 )
 
@@ -86,10 +87,12 @@ async def get_employee_perf(
 
 @router.get("/responsibility-trace", response_model=ResponsibilityTraceResponse)
 async def get_trace(
-    target_type: str = Query(..., regex="^(bucket|flower|warning)$"),
+    target_type: str = Query(..., regex="^(bucket|flower|warning|batch)$"),
     target_id: str = Query(...),
     current_user: User = Depends(get_current_active_user),
 ):
+    if target_type == "batch":
+        return await get_responsibility_trace_by_batch(target_id)
     try:
         tt = ResponsibilityTargetType(target_type)
     except ValueError:

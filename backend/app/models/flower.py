@@ -18,6 +18,7 @@ class Flower(Document):
     flower_code: Indexed(str, unique=True)
     flower_name: str
     category: Link[FlowerCategory]
+    batch_no: Optional[str] = None
     bucket: Optional[Link[Bucket]] = None
     store: Optional[Link[Store]] = None
     current_quantity: int = 0

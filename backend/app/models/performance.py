@@ -41,6 +41,7 @@ class ResponsibilityAction(str, Enum):
 class ResponsibilityTrace(Document):
     target_type: ResponsibilityTargetType
     target_id: str
+    batch_no: Optional[str] = None
     store: Optional[Link[Store]] = None
     bucket: Optional[Link[Bucket]] = None
     flower: Optional[Link[Flower]] = None
