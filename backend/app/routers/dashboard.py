@@ -21,8 +21,11 @@ from app.models import (
     WarningStatus,
     StatusChangeRecord,
     StatusChangeTarget,
+    ResponsibilityTargetType,
+    ResponsibilityAction,
 )
 from app.services.auth import get_current_active_user
+from app.services.performance import add_responsibility_trace
 
 router = APIRouter()
 
@@ -513,6 +516,51 @@ async def handle_warning(
     w.updated_at = datetime.utcnow()
     await w.save()
     await w.fetch_all_links()
+
+    store = w.store if isinstance(w.store, Store) else None
+    bucket = w.bucket if isinstance(w.bucket, Bucket) else None
+    flower = w.flower if isinstance(w.flower, Flower) else None
+    status_label = {
+        WarningStatus.PENDING: "待处理",
+        WarningStatus.HANDLING: "处理中",
+        WarningStatus.RESOLVED: "已解决",
+    }.get(req.status, req.status.value)
+
+    await add_responsibility_trace(
+        target_type=ResponsibilityTargetType.WARNING,
+        target_id=str(w.id),
+        action=ResponsibilityAction.WARNING_HANDLE,
+        user=current_user,
+        remark=f"更新预警状态为{status_label}，备注：{req.note or '无'}",
+        store=store,
+        bucket=bucket,
+        flower=flower,
+        warning=w,
+    )
+    if bucket:
+        await add_responsibility_trace(
+            target_type=ResponsibilityTargetType.BUCKET,
+            target_id=str(bucket.id),
+            action=ResponsibilityAction.WARNING_HANDLE,
+            user=current_user,
+            remark=f"处理预警[{w.warning_type_label}]，状态：{status_label}",
+            store=store,
+            bucket=bucket,
+            flower=flower,
+            warning=w,
+        )
+    if flower:
+        await add_responsibility_trace(
+            target_type=ResponsibilityTargetType.FLOWER,
+            target_id=str(flower.id),
+            action=ResponsibilityAction.WARNING_HANDLE,
+            user=current_user,
+            remark=f"处理预警[{w.warning_type_label}]，状态：{status_label}",
+            store=store,
+            bucket=bucket,
+            flower=flower,
+            warning=w,
+        )
 
     return warning_to_response(w)
 

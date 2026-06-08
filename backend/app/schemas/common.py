@@ -23,6 +23,7 @@ class UserBase(BaseModel):
     username: str
     email: Optional[EmailStr] = None
     full_name: Optional[str] = None
+    position: Optional[str] = "other"
     is_active: bool = True
     is_admin: bool = False
 
@@ -33,6 +34,7 @@ class UserCreate(UserBase):
 
 class UserResponse(UserBase):
     id: str = Field(alias="_id")
+    position_label: Optional[str] = None
     created_at: datetime
 
     class Config:

@@ -12,6 +12,8 @@ from app.models import (
     BucketOutRecord,
     PreservationRecord,
     LossRecord,
+    ResponsibilityTargetType,
+    ResponsibilityAction,
 )
 from app.schemas.record import (
     BucketInCreate,
@@ -25,6 +27,7 @@ from app.schemas.record import (
 )
 from app.schemas.common import PaginatedResponse
 from app.services.auth import get_current_active_user
+from app.services.performance import add_responsibility_trace
 
 router = APIRouter()
 
@@ -117,14 +120,39 @@ async def create_bucket_in(
     flower.updated_at = datetime.utcnow()
     await flower.save()
 
+    operator_name = record_in.operator or current_user.full_name or current_user.username
     record = BucketInRecord(
         bucket=bucket,
         flower=flower,
         quantity=record_in.quantity,
-        operator=record_in.operator or current_user.full_name or current_user.username,
+        operator=operator_name,
         remark=record_in.remark,
     )
     await record.create()
+
+    store = bucket.store if isinstance(bucket.store, Store) else None
+    await add_responsibility_trace(
+        target_type=ResponsibilityTargetType.BUCKET,
+        target_id=str(bucket.id),
+        action=ResponsibilityAction.IN_BUCKET,
+        user=current_user,
+        operator_name=operator_name,
+        remark=f"入桶 {record_in.quantity} 枝花材",
+        store=store,
+        bucket=bucket,
+        flower=flower,
+    )
+    await add_responsibility_trace(
+        target_type=ResponsibilityTargetType.FLOWER,
+        target_id=str(flower.id),
+        action=ResponsibilityAction.IN_BUCKET,
+        user=current_user,
+        operator_name=operator_name,
+        remark=f"入桶 {record_in.quantity} 枝到花桶 {bucket.bucket_code}",
+        store=store,
+        bucket=bucket,
+        flower=flower,
+    )
     return in_record_to_response(record)
 
 
@@ -157,14 +185,43 @@ async def create_bucket_out(
     flower.updated_at = datetime.utcnow()
     await flower.save()
 
+    operator_name = record_in.operator or current_user.full_name or current_user.username
     record = BucketOutRecord(
         bucket=bucket,
         flower=flower,
         quantity=record_in.quantity,
-        operator=record_in.operator or current_user.full_name or current_user.username,
+        operator=operator_name,
         remark=record_in.remark,
     )
     await record.create()
+
+    store = None
+    if isinstance(bucket, Bucket) and isinstance(bucket.store, Store):
+        store = bucket.store
+    elif isinstance(bucket.store, Store):
+        store = bucket.store
+    await add_responsibility_trace(
+        target_type=ResponsibilityTargetType.BUCKET,
+        target_id=str(bucket.id),
+        action=ResponsibilityAction.OUT_BUCKET,
+        user=current_user,
+        operator_name=operator_name,
+        remark=f"回桶 {record_in.quantity} 枝花材",
+        store=store,
+        bucket=bucket,
+        flower=flower,
+    )
+    await add_responsibility_trace(
+        target_type=ResponsibilityTargetType.FLOWER,
+        target_id=str(flower.id),
+        action=ResponsibilityAction.OUT_BUCKET,
+        user=current_user,
+        operator_name=operator_name,
+        remark=f"从花桶 {bucket.bucket_code} 回桶 {record_in.quantity} 枝",
+        store=store,
+        bucket=bucket,
+        flower=flower,
+    )
     return out_record_to_response(record)
 
 
@@ -188,16 +245,28 @@ async def create_preservation(
 
     store = bucket.store if isinstance(bucket.store, Store) else None
 
+    operator_name = record_in.operator or current_user.full_name or current_user.username
     record = PreservationRecord(
         bucket=bucket,
         store=store,
         supplement_quantity=record_in.supplement_quantity,
         previous_quantity=previous_quantity,
         after_quantity=after_quantity,
-        operator=record_in.operator or current_user.full_name or current_user.username,
+        operator=operator_name,
         remark=record_in.remark,
     )
     await record.create()
+
+    await add_responsibility_trace(
+        target_type=ResponsibilityTargetType.BUCKET,
+        target_id=str(bucket.id),
+        action=ResponsibilityAction.PRESERVATION,
+        user=current_user,
+        operator_name=operator_name,
+        remark=f"补液 {record_in.supplement_quantity}L（{previous_quantity}L → {after_quantity}L）",
+        store=store,
+        bucket=bucket,
+    )
     return preservation_to_response(record)
 
 
@@ -221,15 +290,27 @@ async def create_loss(
 
     store = flower.store if isinstance(flower.store, Store) else None
 
+    operator_name = record_in.operator or current_user.full_name or current_user.username
     record = LossRecord(
         flower=flower,
         store=store,
         quantity=record_in.quantity,
         reason=record_in.reason,
-        operator=record_in.operator or current_user.full_name or current_user.username,
+        operator=operator_name,
         remark=record_in.remark,
     )
     await record.create()
+
+    await add_responsibility_trace(
+        target_type=ResponsibilityTargetType.FLOWER,
+        target_id=str(flower.id),
+        action=ResponsibilityAction.LOSS,
+        user=current_user,
+        operator_name=operator_name,
+        remark=f"损耗 {record_in.quantity} 枝，原因：{record_in.reason or '未说明'}",
+        store=store,
+        flower=flower,
+    )
     return loss_to_response(record)
 
 

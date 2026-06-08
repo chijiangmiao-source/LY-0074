@@ -1,4 +1,4 @@
-from app.models.user import User
+from app.models.user import User, EmployeePosition, POSITION_LABELS
 from app.models.store import Store
 from app.models.category import FlowerCategory
 from app.models.bucket import Bucket, BucketStatus
@@ -12,6 +12,13 @@ from app.models.record import (
 )
 from app.models.warning import Warning, WarningType, WarningSeverity, WarningStatus
 from app.models.status_change import StatusChangeRecord, StatusChangeTarget
+from app.models.performance import (
+    TaskType,
+    ResponsibilityTargetType,
+    ResponsibilityAction,
+    ResponsibilityTrace,
+    EmployeePerformanceSnapshot,
+)
 
 all_models = [
     User,
@@ -25,10 +32,14 @@ all_models = [
     LossRecord,
     Warning,
     StatusChangeRecord,
+    ResponsibilityTrace,
+    EmployeePerformanceSnapshot,
 ]
 
 __all__ = [
     "User",
+    "EmployeePosition",
+    "POSITION_LABELS",
     "Store",
     "FlowerCategory",
     "Bucket",
@@ -46,5 +57,10 @@ __all__ = [
     "WarningStatus",
     "StatusChangeRecord",
     "StatusChangeTarget",
+    "TaskType",
+    "ResponsibilityTargetType",
+    "ResponsibilityAction",
+    "ResponsibilityTrace",
+    "EmployeePerformanceSnapshot",
     "all_models",
 ]
