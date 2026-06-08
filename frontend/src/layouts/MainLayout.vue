@@ -94,6 +94,7 @@ const menuItems = computed(() => [
   { to: '/records', title: '业务记录', icon: 'mdi-clipboard-list-outline' },
   { to: '/trace', title: '操作轨迹', icon: 'mdi-history' },
   { to: '/performance', title: '绩效与责任追踪', icon: 'mdi-account-tie-outline' },
+  { to: '/training', title: '培训与能力改进', icon: 'mdi-school-outline' },
 ])
 
 async function loadWarningCount() {

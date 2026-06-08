@@ -19,6 +19,20 @@ from app.models.performance import (
     ResponsibilityTrace,
     EmployeePerformanceSnapshot,
 )
+from app.models.training import (
+    CompetencyDimension,
+    COMPETENCY_LABELS,
+    TrainingCourseStatus,
+    TrainingTaskType,
+    TRAINING_TASK_TYPE_LABELS,
+    TrainingTaskStatus,
+    TRAINING_TASK_STATUS_LABELS,
+    TrainingCourse,
+    EmployeeTrainingTask,
+    CompetencyScoreItem,
+    EmployeeCompetencyAssessment,
+    HighFrequencyError,
+)
 
 all_models = [
     User,
@@ -34,6 +48,10 @@ all_models = [
     StatusChangeRecord,
     ResponsibilityTrace,
     EmployeePerformanceSnapshot,
+    TrainingCourse,
+    EmployeeTrainingTask,
+    EmployeeCompetencyAssessment,
+    HighFrequencyError,
 ]
 
 __all__ = [
@@ -62,5 +80,17 @@ __all__ = [
     "ResponsibilityAction",
     "ResponsibilityTrace",
     "EmployeePerformanceSnapshot",
+    "CompetencyDimension",
+    "COMPETENCY_LABELS",
+    "TrainingCourseStatus",
+    "TrainingTaskType",
+    "TRAINING_TASK_TYPE_LABELS",
+    "TrainingTaskStatus",
+    "TRAINING_TASK_STATUS_LABELS",
+    "TrainingCourse",
+    "EmployeeTrainingTask",
+    "CompetencyScoreItem",
+    "EmployeeCompetencyAssessment",
+    "HighFrequencyError",
     "all_models",
 ]

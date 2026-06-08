@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import init_db
-from app.routers import auth, stores, buckets, flowers, categories, records, dashboard, performance
+from app.routers import auth, stores, buckets, flowers, categories, records, dashboard, performance, training
 
 
 @asynccontextmanager
@@ -41,3 +41,4 @@ app.include_router(flowers.router, prefix="/api/flowers", tags=["花材管理"])
 app.include_router(records.router, prefix="/api/records", tags=["业务记录"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["数据看板"])
 app.include_router(performance.router, prefix="/api/performance", tags=["员工绩效与责任追踪"])
+app.include_router(training.router, prefix="/api/training", tags=["培训与能力改进"])

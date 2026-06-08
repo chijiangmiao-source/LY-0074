@@ -279,3 +279,162 @@ export interface PerformanceSummary {
   avg_on_time_rate: number
   total_loss_quantity: number
 }
+
+export interface CompetencyDimensionInfo {
+  code: string
+  label: string
+}
+
+export interface CompetencyScoreItem {
+  dimension: string
+  dimension_label: string
+  score: number
+  max_score: number
+  level: string
+  level_label: string
+  operations_count: number
+  error_count: number
+  details: Record<string, any>
+}
+
+export interface EmployeeCompetencyAssessment {
+  _id: string
+  user_id: string
+  user_name: string
+  position?: string
+  position_label?: string
+  store_id?: string
+  store_name?: string
+  period_start: string
+  period_end: string
+  overall_score: number
+  overall_level: string
+  overall_level_label: string
+  competency_scores: CompetencyScoreItem[]
+  weak_dimensions: string[]
+  strong_dimensions: string[]
+  training_suggestions: string[]
+  created_at: string
+}
+
+export interface TrainingTask {
+  _id: string
+  user_id: string
+  user_name: string
+  position?: string
+  position_label?: string
+  store_id?: string
+  store_name?: string
+  course_id?: string
+  course_name: string
+  competency_dimension: string
+  competency_dimension_label: string
+  task_type: string
+  task_type_label: string
+  status: string
+  status_label: string
+  assigned_at: string
+  deadline?: string
+  started_at?: string
+  completed_at?: string
+  score?: number
+  passed?: boolean
+  attempts: number
+  remark?: string
+  related_error_ids: string[]
+  related_trace_ids: string[]
+}
+
+export interface TrainingTaskListResponse {
+  items: TrainingTask[]
+  total: number
+}
+
+export interface CreateTrainingTaskRequest {
+  user_id: string
+  course_id?: string
+  course_name: string
+  competency_dimension: string
+  task_type?: string
+  deadline?: string
+  remark?: string
+  related_error_ids?: string[]
+  related_trace_ids?: string[]
+}
+
+export interface UpdateTrainingTaskRequest {
+  status?: string
+  score?: number
+  passed?: boolean
+  remark?: string
+}
+
+export interface HighFrequencyError {
+  _id: string
+  error_type: string
+  error_type_label: string
+  competency_dimension: string
+  competency_dimension_label: string
+  description: string
+  occurrence_count: number
+  affected_employee_count: number
+  affected_store_count: number
+  period_start: string
+  period_end: string
+  related_trace_ids: string[]
+  sample_traces: Array<{
+    trace_id: string
+    operator_name: string
+    created_at: string
+    remark?: string
+    batch_no?: string
+  }>
+  created_at: string
+  updated_at: string
+}
+
+export interface DimensionScoreItem {
+  dimension: string
+  dimension_label: string
+  avg_score: number
+  employee_count: number
+}
+
+export interface TrendDataItem {
+  period: string
+  total_tasks: number
+  completed_tasks: number
+  completion_rate: number
+}
+
+export interface TrainingStats {
+  period_start: string
+  period_end: string
+  store_id?: string
+  store_name?: string
+  total_employees: number
+  total_tasks: number
+  pending_tasks: number
+  in_progress_tasks: number
+  completed_tasks: number
+  failed_tasks: number
+  training_completion_rate: number
+  refresher_tasks: number
+  refresher_passed: number
+  refresher_pass_rate: number
+  exam_tasks: number
+  exam_passed: number
+  exam_pass_rate: number
+  problem_recurrence_rate: number
+  avg_overall_score: number
+  dimension_scores: DimensionScoreItem[]
+  trend_data: TrendDataItem[]
+}
+
+export interface ErrorTraceLinkRequest {
+  error_type: string
+  error_type_label: string
+  competency_dimension: string
+  description: string
+  trace_ids: string[]
+}

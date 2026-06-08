@@ -68,6 +68,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ResponsibilityTrace.vue'),
         meta: { title: '责任追踪详情', icon: 'mdi-account-clock-outline' },
       },
+      {
+        path: 'training',
+        name: 'Training',
+        component: () => import('@/views/Training.vue'),
+        meta: { title: '培训与能力改进', icon: 'mdi-school-outline' },
+      },
     ],
   },
   { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
