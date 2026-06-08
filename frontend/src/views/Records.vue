@@ -310,11 +310,32 @@
               type="number"
               label="入桶数量(枝) *"
               variant="outlined"
-              :rules="[(v: number) => (v && v > 0) || '数量必须大于0']"
+              min="1"
+              max="100000"
+              :rules="[
+                (v: number) => (v && v > 0) || '数量必须大于0',
+                (v: number) => !v || v <= 100000 || '数量不能超过100000',
+              ]"
               class="mb-3"
             />
-            <v-text-field v-model="inForm.operator" label="操作人" variant="outlined" class="mb-3" />
-            <v-textarea v-model="inForm.remark" label="备注" variant="outlined" rows="2" />
+            <v-text-field
+              v-model="inForm.operator"
+              label="操作人"
+              variant="outlined"
+              counter
+              maxlength="20"
+              :rules="[(v: string) => !v || v.length <= 20 || '操作人姓名不能超过20个字符']"
+              class="mb-3"
+            />
+            <v-textarea
+              v-model="inForm.remark"
+              label="备注"
+              variant="outlined"
+              rows="2"
+              counter
+              maxlength="200"
+              :rules="[(v: string) => !v || v.length <= 200 || '备注不能超过200个字符']"
+            />
           </v-card-text>
           <v-divider />
           <v-card-actions class="justify-end">
@@ -357,11 +378,32 @@
               type="number"
               label="回桶数量(枝) *"
               variant="outlined"
-              :rules="[(v: number) => (v && v > 0) || '数量必须大于0']"
+              min="1"
+              max="100000"
+              :rules="[
+                (v: number) => (v && v > 0) || '数量必须大于0',
+                (v: number) => !v || v <= 100000 || '数量不能超过100000',
+              ]"
               class="mb-3"
             />
-            <v-text-field v-model="outForm.operator" label="操作人" variant="outlined" class="mb-3" />
-            <v-textarea v-model="outForm.remark" label="备注" variant="outlined" rows="2" />
+            <v-text-field
+              v-model="outForm.operator"
+              label="操作人"
+              variant="outlined"
+              counter
+              maxlength="20"
+              :rules="[(v: string) => !v || v.length <= 20 || '操作人姓名不能超过20个字符']"
+              class="mb-3"
+            />
+            <v-textarea
+              v-model="outForm.remark"
+              label="备注"
+              variant="outlined"
+              rows="2"
+              counter
+              maxlength="200"
+              :rules="[(v: string) => !v || v.length <= 200 || '备注不能超过200个字符']"
+            />
           </v-card-text>
           <v-divider />
           <v-card-actions class="justify-end">
@@ -394,11 +436,33 @@
               type="number"
               label="补充量(L) *"
               variant="outlined"
-              :rules="[(v: number) => (v && v > 0) || '补充量必须大于0']"
+              min="0.1"
+              max="1000"
+              step="0.1"
+              :rules="[
+                (v: number) => (v && v > 0) || '补充量必须大于0',
+                (v: number) => !v || v <= 1000 || '补充量不能超过1000L',
+              ]"
               class="mb-3"
             />
-            <v-text-field v-model="preservationForm.operator" label="操作人" variant="outlined" class="mb-3" />
-            <v-textarea v-model="preservationForm.remark" label="备注" variant="outlined" rows="2" />
+            <v-text-field
+              v-model="preservationForm.operator"
+              label="操作人"
+              variant="outlined"
+              counter
+              maxlength="20"
+              :rules="[(v: string) => !v || v.length <= 20 || '操作人姓名不能超过20个字符']"
+              class="mb-3"
+            />
+            <v-textarea
+              v-model="preservationForm.remark"
+              label="备注"
+              variant="outlined"
+              rows="2"
+              counter
+              maxlength="200"
+              :rules="[(v: string) => !v || v.length <= 200 || '备注不能超过200个字符']"
+            />
           </v-card-text>
           <v-divider />
           <v-card-actions class="justify-end">
@@ -431,12 +495,41 @@
               type="number"
               label="损耗数量(枝) *"
               variant="outlined"
-              :rules="[(v: number) => (v && v > 0) || '数量必须大于0']"
+              min="1"
+              max="100000"
+              :rules="[
+                (v: number) => (v && v > 0) || '数量必须大于0',
+                (v: number) => !v || v <= 100000 || '数量不能超过100000',
+              ]"
               class="mb-3"
             />
-            <v-text-field v-model="lossForm.reason" label="损耗原因" variant="outlined" class="mb-3" />
-            <v-text-field v-model="lossForm.operator" label="操作人" variant="outlined" class="mb-3" />
-            <v-textarea v-model="lossForm.remark" label="备注" variant="outlined" rows="2" />
+            <v-text-field
+              v-model="lossForm.reason"
+              label="损耗原因"
+              variant="outlined"
+              counter
+              maxlength="100"
+              :rules="[(v: string) => !v || v.length <= 100 || '损耗原因不能超过100个字符']"
+              class="mb-3"
+            />
+            <v-text-field
+              v-model="lossForm.operator"
+              label="操作人"
+              variant="outlined"
+              counter
+              maxlength="20"
+              :rules="[(v: string) => !v || v.length <= 20 || '操作人姓名不能超过20个字符']"
+              class="mb-3"
+            />
+            <v-textarea
+              v-model="lossForm.remark"
+              label="备注"
+              variant="outlined"
+              rows="2"
+              counter
+              maxlength="200"
+              :rules="[(v: string) => !v || v.length <= 200 || '备注不能超过200个字符']"
+            />
           </v-card-text>
           <v-divider />
           <v-card-actions class="justify-end">
@@ -502,10 +595,40 @@ function resetForms() {
   Object.assign(lossForm, { flower_id: '', quantity: 0, reason: '', operator: '', remark: '' })
 }
 
-function openInDialog() { resetForms(); dialog.in = true }
-function openOutDialog() { resetForms(); dialog.out = true }
-function openPreservationDialog() { resetForms(); dialog.preservation = true }
-function openLossDialog() { resetForms(); dialog.loss = true }
+async function openInDialog() {
+  resetForms()
+  if (activeBuckets.value.length === 0) {
+    activeBuckets.value = await bucketApi.listAll({ status: 'active' })
+  }
+  if (flowerOptions.value.length === 0) {
+    flowerOptions.value = await flowerApi.listAll()
+  }
+  dialog.in = true
+}
+async function openOutDialog() {
+  resetForms()
+  if (bucketOptions.value.length === 0) {
+    bucketOptions.value = await bucketApi.listAll()
+  }
+  if (flowerOptions.value.length === 0) {
+    flowerOptions.value = await flowerApi.listAll()
+  }
+  dialog.out = true
+}
+async function openPreservationDialog() {
+  resetForms()
+  if (bucketOptions.value.length === 0) {
+    bucketOptions.value = await bucketApi.listAll()
+  }
+  dialog.preservation = true
+}
+async function openLossDialog() {
+  resetForms()
+  if (flowerOptions.value.length === 0) {
+    flowerOptions.value = await flowerApi.listAll()
+  }
+  dialog.loss = true
+}
 
 async function loadOptions() {
   bucketOptions.value = await bucketApi.listAll()

@@ -151,7 +151,13 @@
               v-model="form.bucket_code"
               label="桶编号 *"
               variant="outlined"
-              :rules="[(v: string) => !!v || '请输入桶编号']"
+              counter
+              maxlength="20"
+              :rules="[
+                (v: string) => !!v || '请输入桶编号',
+                (v: string) => (v && v.length <= 20) || '桶编号不能超过20个字符',
+                (v: string) => /^[A-Za-z0-9_-]+$/.test(v) || '桶编号只能包含字母、数字、下划线和短横线',
+              ]"
               :disabled="editing"
               class="mb-3"
             />
@@ -172,8 +178,12 @@
                   type="number"
                   label="桶体容量(L) *"
                   variant="outlined"
+                  min="0.1"
+                  max="1000"
+                  step="0.1"
                   :rules="[
                     (v: number) => (v && v > 0) || '容量必须大于0',
+                    (v: number) => !v || v <= 1000 || '容量不能超过1000L',
                   ]"
                 />
               </v-col>
@@ -183,6 +193,12 @@
                   type="number"
                   label="当前数量(L)"
                   variant="outlined"
+                  min="0"
+                  max="1000"
+                  step="0.1"
+                  :rules="[
+                    (v: number) => v === undefined || v === null || v >= 0 || '当前数量不能为负数',
+                  ]"
                 />
               </v-col>
             </v-row>
@@ -200,6 +216,9 @@
                   v-model="form.responsible_person"
                   label="责任人"
                   variant="outlined"
+                  counter
+                  maxlength="20"
+                  :rules="[(v: string) => !v || v.length <= 20 || '责任人姓名不能超过20个字符']"
                 />
               </v-col>
             </v-row>
@@ -208,6 +227,9 @@
               label="备注"
               variant="outlined"
               rows="2"
+              counter
+              maxlength="200"
+              :rules="[(v: string) => !v || v.length <= 200 || '备注不能超过200个字符']"
               class="mt-2"
             />
           </v-card-text>
@@ -296,8 +318,11 @@ function resetForm() {
   editId.value = null
 }
 
-function openDialog(item?: Bucket) {
+async function openDialog(item?: Bucket) {
   resetForm()
+  if (storeOptions.value.length === 0) {
+    storeOptions.value = await storeApi.listAll()
+  }
   if (item) {
     editing.value = true
     editId.value = item._id
@@ -350,6 +375,7 @@ async function submitForm() {
       await bucketApi.create({ ...form })
     }
     dialogVisible.value = false
+    query.page = 1
     loadData()
   } catch (err: any) {
     alert(typeof err === 'string' ? err : '操作失败')
@@ -362,6 +388,7 @@ async function deleteItem(item: Bucket) {
   if (!confirm(`确定删除花桶「${item.bucket_code}」吗？`)) return
   try {
     await bucketApi.delete(item._id)
+    query.page = 1
     loadData()
   } catch (err: any) {
     alert(typeof err === 'string' ? err : '删除失败')

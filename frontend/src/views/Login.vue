@@ -20,7 +20,13 @@
             label="用户名"
             prepend-inner-icon="mdi-account"
             variant="outlined"
-            :rules="[(v: string) => !!v || '请输入用户名']"
+            counter
+            maxlength="30"
+            :rules="[
+              (v: string) => !!v || '请输入用户名',
+              (v: string) => !v || v.length <= 30 || '用户名不能超过30个字符',
+              (v: string) => !v || /^[A-Za-z0-9_]+$/.test(v) || '用户名只能包含字母、数字和下划线',
+            ]"
             hide-details="auto"
             class="mb-3"
           />
@@ -30,7 +36,13 @@
             prepend-inner-icon="mdi-lock"
             :type="showPassword ? 'text' : 'password'"
             variant="outlined"
-            :rules="[(v: string) => !!v || '请输入密码']"
+            counter
+            maxlength="50"
+            :rules="[
+              (v: string) => !!v || '请输入密码',
+              (v: string) => !v || v.length >= 6 || '密码至少6个字符',
+              (v: string) => !v || v.length <= 50 || '密码不能超过50个字符',
+            ]"
             hide-details="auto"
             :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
             @click:append-inner="showPassword = !showPassword"

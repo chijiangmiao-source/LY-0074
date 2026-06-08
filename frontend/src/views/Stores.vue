@@ -139,7 +139,13 @@
               v-model="form.store_code"
               label="门店编号 *"
               variant="outlined"
-              :rules="[(v: string) => !!v || '请输入门店编号']"
+              counter
+              maxlength="20"
+              :rules="[
+                (v: string) => !!v || '请输入门店编号',
+                (v: string) => (v && v.length <= 20) || '门店编号不能超过20个字符',
+                (v: string) => /^[A-Za-z0-9_-]+$/.test(v) || '门店编号只能包含字母、数字、下划线和短横线',
+              ]"
               :disabled="editing"
               class="mb-3"
             />
@@ -147,13 +153,21 @@
               v-model="form.store_name"
               label="门店名称 *"
               variant="outlined"
-              :rules="[(v: string) => !!v || '请输入门店名称']"
+              counter
+              maxlength="50"
+              :rules="[
+                (v: string) => !!v || '请输入门店名称',
+                (v: string) => (v && v.length <= 50) || '门店名称不能超过50个字符',
+              ]"
               class="mb-3"
             />
             <v-text-field
               v-model="form.address"
               label="地址"
               variant="outlined"
+              counter
+              maxlength="200"
+              :rules="[(v: string) => !v || v.length <= 200 || '地址不能超过200个字符']"
               class="mb-3"
             />
             <v-row>
@@ -162,6 +176,12 @@
                   v-model="form.phone"
                   label="联系电话"
                   variant="outlined"
+                  counter
+                  maxlength="20"
+                  :rules="[
+                    (v: string) => !v || v.length <= 20 || '联系电话不能超过20个字符',
+                    (v: string) => !v || /^[0-9-+()\s]+$/.test(v) || '请输入有效的电话号码',
+                  ]"
                 />
               </v-col>
               <v-col cols="6">
@@ -169,6 +189,9 @@
                   v-model="form.manager"
                   label="负责人"
                   variant="outlined"
+                  counter
+                  maxlength="20"
+                  :rules="[(v: string) => !v || v.length <= 20 || '负责人姓名不能超过20个字符']"
                 />
               </v-col>
             </v-row>
@@ -285,6 +308,7 @@ async function submitForm() {
       await storeApi.create({ ...form })
     }
     dialogVisible.value = false
+    query.page = 1
     loadData()
   } catch (err: any) {
     alert(typeof err === 'string' ? err : '操作失败')
@@ -297,6 +321,7 @@ async function deleteItem(item: Store) {
   if (!confirm(`确定删除门店「${item.store_name}」吗？`)) return
   try {
     await storeApi.delete(item._id)
+    query.page = 1
     loadData()
   } catch (err: any) {
     alert(typeof err === 'string' ? err : '删除失败')

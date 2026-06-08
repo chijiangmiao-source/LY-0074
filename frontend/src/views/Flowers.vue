@@ -158,7 +158,13 @@
                   v-model="form.flower_code"
                   label="花材编号 *"
                   variant="outlined"
-                  :rules="[(v: string) => !!v || '请输入花材编号']"
+                  counter
+                  maxlength="20"
+                  :rules="[
+                    (v: string) => !!v || '请输入花材编号',
+                    (v: string) => (v && v.length <= 20) || '花材编号不能超过20个字符',
+                    (v: string) => /^[A-Za-z0-9_-]+$/.test(v) || '花材编号只能包含字母、数字、下划线和短横线',
+                  ]"
                   :disabled="editing"
                 />
               </v-col>
@@ -167,7 +173,12 @@
                   v-model="form.flower_name"
                   label="花材名称 *"
                   variant="outlined"
-                  :rules="[(v: string) => !!v || '请输入花材名称']"
+                  counter
+                  maxlength="30"
+                  :rules="[
+                    (v: string) => !!v || '请输入花材名称',
+                    (v: string) => (v && v.length <= 30) || '花材名称不能超过30个字符',
+                  ]"
                 />
               </v-col>
             </v-row>
@@ -213,6 +224,12 @@
                   type="number"
                   label="当前数量(枝)"
                   variant="outlined"
+                  min="0"
+                  max="100000"
+                  :rules="[
+                    (v: number) => v === undefined || v === null || v >= 0 || '数量不能为负数',
+                    (v: number) => !v || v <= 100000 || '数量不能超过100000',
+                  ]"
                 />
               </v-col>
             </v-row>
@@ -240,6 +257,9 @@
               label="备注"
               variant="outlined"
               rows="2"
+              counter
+              maxlength="200"
+              :rules="[(v: string) => !v || v.length <= 200 || '备注不能超过200个字符']"
               class="mt-2"
             />
           </v-card-text>
@@ -343,8 +363,17 @@ function resetForm() {
   editId.value = null
 }
 
-function openDialog(item?: Flower) {
+async function openDialog(item?: Flower) {
   resetForm()
+  if (categoryOptions.value.length === 0) {
+    categoryOptions.value = await categoryApi.listAll()
+  }
+  if (storeOptions.value.length === 0) {
+    storeOptions.value = await storeApi.listAll()
+  }
+  if (bucketOptions.value.length === 0) {
+    bucketOptions.value = await bucketApi.listAll()
+  }
   if (item) {
     editing.value = true
     editId.value = item._id
@@ -427,6 +456,7 @@ async function submitForm() {
       await flowerApi.create(payload)
     }
     dialogVisible.value = false
+    query.page = 1
     loadData()
   } catch (err: any) {
     alert(typeof err === 'string' ? err : '操作失败')
@@ -439,6 +469,7 @@ async function deleteItem(item: Flower) {
   if (!confirm(`确定删除花材「${item.flower_name}」吗？`)) return
   try {
     await flowerApi.delete(item._id)
+    query.page = 1
     loadData()
   } catch (err: any) {
     alert(typeof err === 'string' ? err : '删除失败')

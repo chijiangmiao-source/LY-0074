@@ -93,7 +93,13 @@
               v-model="form.category_code"
               label="分类编号 *"
               variant="outlined"
-              :rules="[(v: string) => !!v || '请输入分类编号']"
+              counter
+              maxlength="20"
+              :rules="[
+                (v: string) => !!v || '请输入分类编号',
+                (v: string) => (v && v.length <= 20) || '分类编号不能超过20个字符',
+                (v: string) => /^[A-Za-z0-9_-]+$/.test(v) || '分类编号只能包含字母、数字、下划线和短横线',
+              ]"
               :disabled="editing"
               class="mb-3"
             />
@@ -101,7 +107,12 @@
               v-model="form.category_name"
               label="分类名称 *"
               variant="outlined"
-              :rules="[(v: string) => !!v || '请输入分类名称']"
+              counter
+              maxlength="30"
+              :rules="[
+                (v: string) => !!v || '请输入分类名称',
+                (v: string) => (v && v.length <= 30) || '分类名称不能超过30个字符',
+              ]"
               class="mb-3"
             />
             <v-textarea
@@ -109,6 +120,9 @@
               label="描述"
               variant="outlined"
               rows="3"
+              counter
+              maxlength="200"
+              :rules="[(v: string) => !v || v.length <= 200 || '描述不能超过200个字符']"
             />
           </v-card-text>
           <v-divider />
@@ -202,6 +216,7 @@ async function submitForm() {
       await categoryApi.create({ ...form })
     }
     dialogVisible.value = false
+    query.page = 1
     loadData()
   } catch (err: any) {
     alert(typeof err === 'string' ? err : '操作失败')
@@ -214,6 +229,7 @@ async function deleteItem(item: FlowerCategory) {
   if (!confirm(`确定删除分类「${item.category_name}」吗？`)) return
   try {
     await categoryApi.delete(item._id)
+    query.page = 1
     loadData()
   } catch (err: any) {
     alert(typeof err === 'string' ? err : '删除失败')
