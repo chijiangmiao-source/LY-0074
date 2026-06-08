@@ -58,7 +58,13 @@ export interface RecentRecord {
 export interface WarningQuery {
   store_id?: string
   warning_type?: string
-  only_pending?: boolean
+  status?: string
+}
+
+export interface WarningHandleRequest {
+  warning_id: string
+  status: 'pending' | 'handling' | 'resolved'
+  note?: string
 }
 
 export interface OperationTraceQuery {
@@ -82,6 +88,8 @@ export const dashboardApi = {
     request.get<unknown, RecentRecord[]>('/dashboard/recent-records', { params: { limit } }),
   warnings: (params?: WarningQuery) =>
     request.get<unknown, Warning[]>('/dashboard/warnings', { params }),
+  handleWarning: (data: WarningHandleRequest) =>
+    request.post<unknown, Warning>('/dashboard/warnings/handle', data),
   operationTrace: (params?: OperationTraceQuery) =>
     request.get<unknown, PaginatedResponse<OperationTrace>>('/dashboard/operation-trace', { params }),
 }

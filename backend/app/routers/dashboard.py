@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from typing import List, Dict, Any, Optional
 from bson import ObjectId
+from pydantic import BaseModel
 from app.models import (
     User,
     Bucket,
@@ -14,6 +15,12 @@ from app.models import (
     BucketOutRecord,
     PreservationRecord,
     LossRecord,
+    Warning,
+    WarningType,
+    WarningSeverity,
+    WarningStatus,
+    StatusChangeRecord,
+    StatusChangeTarget,
 )
 from app.services.auth import get_current_active_user
 
@@ -21,7 +28,77 @@ router = APIRouter()
 
 LOW_LIQUID_THRESHOLD = 0.3
 IN_BUCKET_WARNING_HOURS = 72
-HIGH_LOSS_THRESHOLD = 10
+HIGH_LOSS_RATE_THRESHOLD = 0.15
+MEDIUM_LOSS_RATE_THRESHOLD = 0.08
+
+
+class WarningHandleRequest(BaseModel):
+    warning_id: str
+    status: WarningStatus
+    note: Optional[str] = None
+
+
+def warning_to_response(w: Warning) -> dict:
+    store_id = ""
+    store_name = ""
+    if isinstance(w.store, Store):
+        store_id = str(w.store.id)
+        store_name = w.store.store_name
+    elif w.store:
+        store_id = str(w.store)
+
+    bucket_id = ""
+    bucket_code = ""
+    if isinstance(w.bucket, Bucket):
+        bucket_id = str(w.bucket.id)
+        bucket_code = w.bucket.bucket_code
+    elif w.bucket:
+        bucket_id = str(w.bucket)
+
+    flower_id = ""
+    flower_name = ""
+    flower_code = ""
+    if isinstance(w.flower, Flower):
+        flower_id = str(w.flower.id)
+        flower_name = w.flower.flower_name
+        flower_code = w.flower.flower_code
+    elif w.flower:
+        flower_id = str(w.flower)
+
+    handler_name = ""
+    if isinstance(w.handler, User):
+        handler_name = w.handler.full_name or w.handler.username
+    elif w.handler:
+        handler_name = str(w.handler)
+
+    return {
+        "warning_id": str(w.id),
+        "warning_type": w.warning_type.value,
+        "warning_type_label": w.warning_type_label,
+        "severity": w.severity.value,
+        "store_id": store_id,
+        "store_name": store_name,
+        "bucket_id": bucket_id,
+        "bucket_code": bucket_code,
+        "flower_id": flower_id,
+        "flower_name": flower_name,
+        "flower_code": flower_code,
+        "message": w.message,
+        "current_value": w.current_value,
+        "threshold": w.threshold_value,
+        "unit": w.unit,
+        "status": w.status.value,
+        "status_label": {
+            WarningStatus.PENDING: "待处理",
+            WarningStatus.HANDLING: "处理中",
+            WarningStatus.RESOLVED: "已解决",
+        }.get(w.status, w.status.value),
+        "handler": handler_name,
+        "handled_at": w.handled_at.isoformat() if w.handled_at else None,
+        "handle_note": w.handle_note,
+        "created_at": w.created_at.isoformat(),
+        "updated_at": w.updated_at.isoformat(),
+    }
 
 
 @router.get("/summary")
@@ -119,16 +196,23 @@ async def get_store_loss_ranking(
 ):
     stores = await Store.find(Store.is_active == True).to_list()
     result = []
+    now = datetime.utcnow()
 
     for store in stores:
         loss_records = await LossRecord.find(LossRecord.store.id == store.id).to_list()
         total_loss_qty = sum(r.quantity for r in loss_records)
         total_loss_count = len(loss_records)
 
+        recent_7d = [r for r in loss_records if (now - r.created_at).days <= 7]
+        recent_loss_qty = sum(r.quantity for r in recent_7d)
+
         flower_qty = 0
         flowers = await Flower.find(Flower.store.id == store.id).to_list()
         for f in flowers:
             flower_qty += f.current_quantity
+
+        base_total = flower_qty + recent_loss_qty
+        loss_rate = recent_loss_qty / base_total if base_total > 0 else 0
 
         result.append({
             "store_id": str(store.id),
@@ -138,6 +222,8 @@ async def get_store_loss_ranking(
             "total_loss_quantity": total_loss_qty,
             "total_loss_count": total_loss_count,
             "current_flower_quantity": flower_qty,
+            "recent_loss_quantity_7d": recent_loss_qty,
+            "loss_rate_7d": round(loss_rate * 100, 2),
         })
 
     result.sort(key=lambda x: x["total_loss_quantity"], reverse=True)
@@ -216,144 +302,219 @@ async def get_recent_records(
     return all_records[:limit]
 
 
+async def sync_generated_warnings(current_user: User):
+    """根据当前数据状态生成/更新预警并持久化"""
+    now = datetime.utcnow()
+    buckets = await Bucket.find(fetch_links=True).to_list()
+    flowers = await Flower.find(fetch_links=True).to_list()
+    stores = await Store.find(Store.is_active == True).to_list()
+
+    active_keys = set()
+
+    # 液位预警
+    for bucket in buckets:
+        if bucket.capacity <= 0:
+            continue
+        liquid_ratio = bucket.current_quantity / bucket.capacity
+        if liquid_ratio < LOW_LIQUID_THRESHOLD:
+            severity = WarningSeverity.HIGH if liquid_ratio < 0.1 else WarningSeverity.MEDIUM
+            key = f"{WarningType.LOW_LIQUID.value}:{bucket.id}"
+            active_keys.add(key)
+            store_ref = bucket.store if isinstance(bucket.store, Store) else None
+            existing = await Warning.find_one(
+                Warning.warning_type == WarningType.LOW_LIQUID,
+                Warning.bucket.id == bucket.id,
+                Warning.status != WarningStatus.RESOLVED,
+            )
+            if not existing:
+                w = Warning(
+                    warning_type=WarningType.LOW_LIQUID,
+                    warning_type_label="液位过低",
+                    severity=severity,
+                    store=store_ref,
+                    bucket=bucket,
+                    flower=None,
+                    message=f"花桶 {bucket.bucket_code} 液位仅 {liquid_ratio*100:.1f}%，需要及时补充保鲜液",
+                    current_value=str(round(bucket.current_quantity, 2)),
+                    threshold_value=str(round(bucket.capacity * LOW_LIQUID_THRESHOLD, 2)),
+                    unit="L",
+                    status=WarningStatus.PENDING,
+                    created_at=now,
+                    updated_at=now,
+                )
+                await w.create()
+            else:
+                existing.severity = severity
+                existing.current_value = str(round(bucket.current_quantity, 2))
+                existing.message = f"花桶 {bucket.bucket_code} 液位仅 {liquid_ratio*100:.1f}%，需要及时补充保鲜液"
+                existing.updated_at = now
+                await existing.save()
+
+    # 萎蔫预警
+    for flower in flowers:
+        if flower.preservation_status == PreservationStatus.WILTED:
+            key = f"{WarningType.WILTED.value}:{flower.id}"
+            active_keys.add(key)
+            store_ref = flower.store if isinstance(flower.store, Store) else None
+            bucket_ref = flower.bucket if isinstance(flower.bucket, Bucket) else None
+            existing = await Warning.find_one(
+                Warning.warning_type == WarningType.WILTED,
+                Warning.flower.id == flower.id,
+                Warning.status != WarningStatus.RESOLVED,
+            )
+            if not existing:
+                w = Warning(
+                    warning_type=WarningType.WILTED,
+                    warning_type_label="花材萎蔫",
+                    severity=WarningSeverity.HIGH,
+                    store=store_ref,
+                    bucket=bucket_ref,
+                    flower=flower,
+                    message=f"花材 {flower.flower_name}({flower.flower_code}) 已萎蔫，需要及时处理",
+                    current_value="wilted",
+                    threshold_value="fresh/normal",
+                    unit="",
+                    status=WarningStatus.PENDING,
+                    created_at=now,
+                    updated_at=now,
+                )
+                await w.create()
+
+    # 入桶超时预警
+    for flower in flowers:
+        if not flower.in_bucket_date or not flower.bucket:
+            continue
+        hours_in_bucket = (now - flower.in_bucket_date).total_seconds() / 3600
+        if hours_in_bucket > IN_BUCKET_WARNING_HOURS:
+            severity = WarningSeverity.MEDIUM if hours_in_bucket < 120 else WarningSeverity.HIGH
+            key = f"{WarningType.LONG_IN_BUCKET.value}:{flower.id}"
+            active_keys.add(key)
+            store_ref = flower.store if isinstance(flower.store, Store) else None
+            bucket_ref = flower.bucket if isinstance(flower.bucket, Bucket) else None
+            existing = await Warning.find_one(
+                Warning.warning_type == WarningType.LONG_IN_BUCKET,
+                Warning.flower.id == flower.id,
+                Warning.status != WarningStatus.RESOLVED,
+            )
+            if not existing:
+                w = Warning(
+                    warning_type=WarningType.LONG_IN_BUCKET,
+                    warning_type_label="入桶时间过长",
+                    severity=severity,
+                    store=store_ref,
+                    bucket=bucket_ref,
+                    flower=flower,
+                    message=f"花材 {flower.flower_name} 已入桶 {hours_in_bucket:.1f} 小时，超过建议时长",
+                    current_value=str(round(hours_in_bucket, 1)),
+                    threshold_value=str(IN_BUCKET_WARNING_HOURS),
+                    unit="小时",
+                    status=WarningStatus.PENDING,
+                    created_at=now,
+                    updated_at=now,
+                )
+                await w.create()
+            else:
+                existing.severity = severity
+                existing.current_value = str(round(hours_in_bucket, 1))
+                existing.message = f"花材 {flower.flower_name} 已入桶 {hours_in_bucket:.1f} 小时，超过建议时长"
+                existing.updated_at = now
+                await existing.save()
+
+    # 高损耗预警（基于损耗率）
+    for store in stores:
+        loss_records = await LossRecord.find(LossRecord.store.id == store.id).to_list()
+        recent_7d = [r for r in loss_records if (now - r.created_at).days <= 7]
+        recent_loss_qty = sum(r.quantity for r in recent_7d)
+
+        store_flowers = await Flower.find(Flower.store.id == store.id).to_list()
+        current_qty = sum(f.current_quantity for f in store_flowers)
+
+        base_total = current_qty + recent_loss_qty
+        if base_total <= 0:
+            continue
+        loss_rate = recent_loss_qty / base_total
+
+        if loss_rate >= MEDIUM_LOSS_RATE_THRESHOLD:
+            severity = WarningSeverity.HIGH if loss_rate >= HIGH_LOSS_RATE_THRESHOLD else WarningSeverity.MEDIUM
+            key = f"{WarningType.HIGH_LOSS.value}:{store.id}"
+            active_keys.add(key)
+            existing = await Warning.find_one(
+                Warning.warning_type == WarningType.HIGH_LOSS,
+                Warning.store.id == store.id,
+                Warning.status != WarningStatus.RESOLVED,
+            )
+            if not existing:
+                w = Warning(
+                    warning_type=WarningType.HIGH_LOSS,
+                    warning_type_label="损耗过高",
+                    severity=severity,
+                    store=store,
+                    bucket=None,
+                    flower=None,
+                    message=f"门店 {store.store_name} 近7天损耗率 {loss_rate*100:.1f}%（损耗{recent_loss_qty}枝 / 总库存{base_total}枝），超过阈值",
+                    current_value=str(round(loss_rate * 100, 1)),
+                    threshold_value=str(round(MEDIUM_LOSS_RATE_THRESHOLD * 100, 1)),
+                    unit="%",
+                    status=WarningStatus.PENDING,
+                    created_at=now,
+                    updated_at=now,
+                )
+                await w.create()
+            else:
+                existing.severity = severity
+                existing.current_value = str(round(loss_rate * 100, 1))
+                existing.message = f"门店 {store.store_name} 近7天损耗率 {loss_rate*100:.1f}%（损耗{recent_loss_qty}枝 / 总库存{base_total}枝），超过阈值"
+                existing.updated_at = now
+                await existing.save()
+
+
 @router.get("/warnings")
 async def get_warnings(
     current_user: User = Depends(get_current_active_user),
     store_id: Optional[str] = Query(None),
     warning_type: Optional[str] = Query(None),
-    only_pending: bool = Query(True),
+    status: Optional[str] = Query(None),
 ):
-    warnings = []
-    now = datetime.utcnow()
+    await sync_generated_warnings(current_user)
 
-    buckets = await Bucket.find(fetch_links=True).to_list()
-    flowers = await Flower.find(fetch_links=True).to_list()
-    stores = await Store.find_all().to_list()
-    store_map = {str(s.id): s for s in stores}
+    query = {}
+    if status:
+        query["status"] = WarningStatus(status)
+    else:
+        query["status"] = {"$in": [WarningStatus.PENDING, WarningStatus.HANDLING]}
 
-    for bucket in buckets:
-        if store_id and bucket.store:
-            bucket_store_id = str(bucket.store.id) if isinstance(bucket.store, Store) else str(bucket.store)
-            if bucket_store_id != store_id:
-                continue
+    warnings = await Warning.find(query, fetch_links=True).sort("-severity", "-created_at").to_list()
 
-        if bucket.capacity > 0:
-            liquid_ratio = bucket.current_quantity / bucket.capacity
-            if liquid_ratio < LOW_LIQUID_THRESHOLD:
-                store_name = ""
-                if isinstance(bucket.store, Store):
-                    store_name = bucket.store.store_name
-                warnings.append({
-                    "warning_id": f"liquid_{bucket.id}",
-                    "warning_type": "low_liquid",
-                    "warning_type_label": "液位过低",
-                    "severity": "high" if liquid_ratio < 0.1 else "medium",
-                    "store_id": str(bucket.store.id) if isinstance(bucket.store, Store) else str(bucket.store) if bucket.store else None,
-                    "store_name": store_name,
-                    "bucket_id": str(bucket.id),
-                    "bucket_code": bucket.bucket_code,
-                    "flower_id": None,
-                    "flower_name": None,
-                    "flower_code": None,
-                    "message": f"花桶 {bucket.bucket_code} 液位仅 {liquid_ratio*100:.1f}%，需要及时补充保鲜液",
-                    "current_value": round(bucket.current_quantity, 2),
-                    "threshold": round(bucket.capacity * LOW_LIQUID_THRESHOLD, 2),
-                    "unit": "L",
-                    "created_at": now,
-                    "handled": False,
-                })
-
-    for flower in flowers:
-        if store_id and flower.store:
-            flower_store_id = str(flower.store.id) if isinstance(flower.store, Store) else str(flower.store)
-            if flower_store_id != store_id:
-                continue
-
-        store_name = ""
-        if isinstance(flower.store, Store):
-            store_name = flower.store.store_name
-
-        bucket_code = ""
-        if isinstance(flower.bucket, Bucket):
-            bucket_code = flower.bucket.bucket_code
-
-        if flower.preservation_status == PreservationStatus.WILTED:
-            warnings.append({
-                "warning_id": f"preservation_{flower.id}",
-                "warning_type": "wilted",
-                "warning_type_label": "花材萎蔫",
-                "severity": "high",
-                "store_id": str(flower.store.id) if isinstance(flower.store, Store) else str(flower.store) if flower.store else None,
-                "store_name": store_name,
-                "bucket_id": str(flower.bucket.id) if isinstance(flower.bucket, Bucket) else str(flower.bucket) if flower.bucket else None,
-                "bucket_code": bucket_code,
-                "flower_id": str(flower.id),
-                "flower_name": flower.flower_name,
-                "flower_code": flower.flower_code,
-                "message": f"花材 {flower.flower_name}({flower.flower_code}) 已萎蔫，需要及时处理",
-                "current_value": "wilted",
-                "threshold": "fresh/normal",
-                "unit": "",
-                "created_at": now,
-                "handled": False,
-            })
-
-        if flower.in_bucket_date:
-            hours_in_bucket = (now - flower.in_bucket_date).total_seconds() / 3600
-            if hours_in_bucket > IN_BUCKET_WARNING_HOURS:
-                warnings.append({
-                    "warning_id": f"duration_{flower.id}",
-                    "warning_type": "long_in_bucket",
-                    "warning_type_label": "入桶时间过长",
-                    "severity": "medium" if hours_in_bucket < 120 else "high",
-                    "store_id": str(flower.store.id) if isinstance(flower.store, Store) else str(flower.store) if flower.store else None,
-                    "store_name": store_name,
-                    "bucket_id": str(flower.bucket.id) if isinstance(flower.bucket, Bucket) else str(flower.bucket) if flower.bucket else None,
-                    "bucket_code": bucket_code,
-                    "flower_id": str(flower.id),
-                    "flower_name": flower.flower_name,
-                    "flower_code": flower.flower_code,
-                    "message": f"花材 {flower.flower_name} 已入桶 {hours_in_bucket:.1f} 小时，超过建议时长",
-                    "current_value": round(hours_in_bucket, 1),
-                    "threshold": IN_BUCKET_WARNING_HOURS,
-                    "unit": "小时",
-                    "created_at": now,
-                    "handled": False,
-                })
-
-    for store in stores:
-        if store_id and str(store.id) != store_id:
+    result = []
+    for w in warnings:
+        w_data = warning_to_response(w)
+        if store_id and w_data["store_id"] != store_id:
             continue
-        recent_loss = await LossRecord.find(LossRecord.store.id == store.id).to_list()
-        recent_7d = [r for r in recent_loss if (now - r.created_at).days <= 7]
-        total_loss_qty = sum(r.quantity for r in recent_7d)
-        if total_loss_qty >= HIGH_LOSS_THRESHOLD:
-            warnings.append({
-                "warning_id": f"loss_{store.id}",
-                "warning_type": "high_loss",
-                "warning_type_label": "损耗过高",
-                "severity": "high" if total_loss_qty >= 30 else "medium",
-                "store_id": str(store.id),
-                "store_name": store.store_name,
-                "bucket_id": None,
-                "bucket_code": None,
-                "flower_id": None,
-                "flower_name": None,
-                "flower_code": None,
-                "message": f"门店 {store.store_name} 近7天损耗 {total_loss_qty} 枝花材，损耗过高",
-                "current_value": total_loss_qty,
-                "threshold": HIGH_LOSS_THRESHOLD,
-                "unit": "枝",
-                "created_at": now,
-                "handled": False,
-            })
+        if warning_type and w_data["warning_type"] != warning_type:
+            continue
+        result.append(w_data)
 
-    if warning_type:
-        warnings = [w for w in warnings if w["warning_type"] == warning_type]
+    return result
 
-    warnings.sort(key=lambda x: {"high": 0, "medium": 1, "low": 2}[x["severity"]])
 
-    return warnings
+@router.post("/warnings/handle")
+async def handle_warning(
+    req: WarningHandleRequest,
+    current_user: User = Depends(get_current_active_user),
+):
+    w = await Warning.get(ObjectId(req.warning_id), fetch_links=True)
+    if not w:
+        raise HTTPException(status_code=404, detail="预警不存在")
+
+    w.status = req.status
+    w.handler = current_user
+    w.handle_note = req.note
+    w.handled_at = datetime.utcnow()
+    w.updated_at = datetime.utcnow()
+    await w.save()
+    await w.fetch_all_links()
+
+    return warning_to_response(w)
 
 
 @router.get("/operation-trace")
@@ -381,46 +542,43 @@ async def get_operation_trace(
     out_query = dict(query_conditions)
     pres_query = dict(query_conditions)
     loss_query = dict(query_conditions)
+    status_query = dict(query_conditions)
 
     if bucket_id:
         in_query["bucket"] = ObjectId(bucket_id)
         out_query["bucket"] = ObjectId(bucket_id)
         pres_query["bucket"] = ObjectId(bucket_id)
+        status_query["bucket"] = ObjectId(bucket_id)
     if flower_id:
         in_query["flower"] = ObjectId(flower_id)
         out_query["flower"] = ObjectId(flower_id)
         loss_query["flower"] = ObjectId(flower_id)
+        status_query["flower"] = ObjectId(flower_id)
     if store_id:
         pres_query["store"] = ObjectId(store_id)
         loss_query["store"] = ObjectId(store_id)
+        status_query["store"] = ObjectId(store_id)
 
     in_records = await BucketInRecord.find(in_query, fetch_links=True).sort("-created_at").to_list()
     out_records = await BucketOutRecord.find(out_query, fetch_links=True).sort("-created_at").to_list()
     pres_records = await PreservationRecord.find(pres_query, fetch_links=True).sort("-created_at").to_list()
     loss_records = await LossRecord.find(loss_query, fetch_links=True).sort("-created_at").to_list()
+    status_records = await StatusChangeRecord.find(status_query, fetch_links=True).sort("-created_at").to_list()
 
     all_traces = []
 
-    def get_store_name(obj):
-        if hasattr(obj, "store") and isinstance(obj.store, Store):
-            return obj.store.store_name
-        return ""
-
-    def get_store_id(obj):
-        if hasattr(obj, "store") and isinstance(obj.store, Store):
-            return str(obj.store.id)
-        return ""
-
     for r in in_records:
         store_info = ""
+        store_id_val = ""
         if isinstance(r.bucket, Bucket) and isinstance(r.bucket.store, Store):
             store_info = r.bucket.store.store_name
+            store_id_val = str(r.bucket.store.id)
         all_traces.append({
             "trace_id": f"in_{r.id}",
             "operation_type": "in_bucket",
             "operation_type_label": "入桶",
             "store_name": store_info,
-            "store_id": str(r.bucket.store.id) if isinstance(r.bucket, Bucket) and isinstance(r.bucket.store, Store) else "",
+            "store_id": store_id_val,
             "bucket_id": str(r.bucket.id) if isinstance(r.bucket, Bucket) else str(r.bucket),
             "bucket_code": r.bucket.bucket_code if isinstance(r.bucket, Bucket) else "",
             "flower_id": str(r.flower.id) if isinstance(r.flower, Flower) else str(r.flower),
@@ -436,14 +594,16 @@ async def get_operation_trace(
 
     for r in out_records:
         store_info = ""
+        store_id_val = ""
         if isinstance(r.bucket, Bucket) and isinstance(r.bucket.store, Store):
             store_info = r.bucket.store.store_name
+            store_id_val = str(r.bucket.store.id)
         all_traces.append({
             "trace_id": f"out_{r.id}",
             "operation_type": "out_bucket",
             "operation_type_label": "回桶",
             "store_name": store_info,
-            "store_id": str(r.bucket.store.id) if isinstance(r.bucket, Bucket) and isinstance(r.bucket.store, Store) else "",
+            "store_id": store_id_val,
             "bucket_id": str(r.bucket.id) if isinstance(r.bucket, Bucket) else str(r.bucket),
             "bucket_code": r.bucket.bucket_code if isinstance(r.bucket, Bucket) else "",
             "flower_id": str(r.flower.id) if isinstance(r.flower, Flower) else str(r.flower),
@@ -494,6 +654,43 @@ async def get_operation_trace(
             "operator": r.operator or "",
             "remark": r.remark or "",
             "detail": f"损耗 {r.quantity} 枝，原因：{r.reason or '未说明'}",
+            "created_at": r.created_at,
+        })
+
+    STATUS_TYPE_LABEL = {
+        StatusChangeTarget.BUCKET_STATUS: "花桶状态变更",
+        StatusChangeTarget.FLOWER_PRESERVATION: "花材保鲜状态变更",
+        StatusChangeTarget.FLOWER_BUCKET: "花材所在花桶变更",
+    }
+
+    for r in status_records:
+        store_name = r.store.store_name if isinstance(r.store, Store) else ""
+        store_id_val = str(r.store.id) if isinstance(r.store, Store) else ""
+        bucket_code = r.bucket.bucket_code if isinstance(r.bucket, Bucket) else ""
+        bucket_id_val = str(r.bucket.id) if isinstance(r.bucket, Bucket) else ""
+        flower_name = r.flower.flower_name if isinstance(r.flower, Flower) else ""
+        flower_code = r.flower.flower_code if isinstance(r.flower, Flower) else ""
+        flower_id_val = str(r.flower.id) if isinstance(r.flower, Flower) else ""
+
+        op_label = STATUS_TYPE_LABEL.get(r.target_type, "状态变更")
+        detail = f"{op_label}：{r.old_label or '-'} → {r.new_label}"
+
+        all_traces.append({
+            "trace_id": f"status_{r.id}",
+            "operation_type": "status_change",
+            "operation_type_label": "状态变更",
+            "store_name": store_name,
+            "store_id": store_id_val,
+            "bucket_id": bucket_id_val,
+            "bucket_code": bucket_code,
+            "flower_id": flower_id_val,
+            "flower_name": flower_name,
+            "flower_code": flower_code,
+            "quantity": 0,
+            "quantity_unit": "",
+            "operator": r.operator_name or "",
+            "remark": r.remark or "",
+            "detail": detail,
             "created_at": r.created_at,
         })
 

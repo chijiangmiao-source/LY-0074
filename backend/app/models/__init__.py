@@ -10,6 +10,8 @@ from app.models.record import (
     PreservationRecord,
     LossRecord,
 )
+from app.models.warning import Warning, WarningType, WarningSeverity, WarningStatus
+from app.models.status_change import StatusChangeRecord, StatusChangeTarget
 
 all_models = [
     User,
@@ -21,6 +23,8 @@ all_models = [
     BucketOutRecord,
     PreservationRecord,
     LossRecord,
+    Warning,
+    StatusChangeRecord,
 ]
 
 __all__ = [
@@ -36,5 +40,11 @@ __all__ = [
     "BucketOutRecord",
     "PreservationRecord",
     "LossRecord",
+    "Warning",
+    "WarningType",
+    "WarningSeverity",
+    "WarningStatus",
+    "StatusChangeRecord",
+    "StatusChangeTarget",
     "all_models",
 ]

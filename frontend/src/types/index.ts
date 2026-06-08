@@ -132,6 +132,7 @@ export interface PaginatedResponse<T> {
 
 export type WarningType = 'low_liquid' | 'wilted' | 'long_in_bucket' | 'high_loss'
 export type WarningSeverity = 'high' | 'medium' | 'low'
+export type WarningStatusType = 'pending' | 'handling' | 'resolved'
 
 export interface Warning {
   warning_id: string
@@ -149,11 +150,16 @@ export interface Warning {
   current_value: string | number
   threshold: string | number
   unit: string
+  status: WarningStatusType
+  status_label: string
+  handler: string
+  handled_at?: string
+  handle_note?: string
   created_at: string
-  handled: boolean
+  updated_at: string
 }
 
-export type OperationType = 'in_bucket' | 'out_bucket' | 'preservation' | 'loss'
+export type OperationType = 'in_bucket' | 'out_bucket' | 'preservation' | 'loss' | 'status_change'
 
 export interface OperationTrace {
   trace_id: string

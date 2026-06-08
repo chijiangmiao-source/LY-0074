@@ -9,6 +9,8 @@ from app.models import (
     Bucket,
     Store,
     User,
+    StatusChangeRecord,
+    StatusChangeTarget,
 )
 from app.schemas.flower import (
     FlowerCreate,
@@ -22,6 +24,42 @@ from app.schemas.common import PaginatedResponse
 from app.services.auth import get_current_active_user
 
 router = APIRouter()
+
+PRESERVATION_STATUS_LABEL = {
+    PreservationStatus.FRESH: "新鲜",
+    PreservationStatus.NORMAL: "一般",
+    PreservationStatus.WILTED: "萎蔫",
+}
+
+
+async def create_flower_status_change_record(
+    target_type: StatusChangeTarget,
+    target_id: str,
+    old_status: Optional[str],
+    new_status: str,
+    old_label: Optional[str],
+    new_label: str,
+    current_user: User,
+    store: Optional[Store] = None,
+    bucket: Optional[Bucket] = None,
+    flower: Optional[Flower] = None,
+    remark: Optional[str] = None,
+):
+    record = StatusChangeRecord(
+        target_type=target_type,
+        target_id=target_id,
+        store=store,
+        bucket=bucket,
+        flower=flower,
+        old_status=old_status,
+        new_status=new_status,
+        old_label=old_label,
+        new_label=new_label,
+        operator=current_user,
+        operator_name=current_user.full_name or current_user.username,
+        remark=remark,
+    )
+    await record.create()
 
 
 def flower_to_response(flower: Flower) -> dict:
@@ -175,6 +213,10 @@ async def update_flower(
 
     update_data = flower_in.model_dump(exclude_unset=True)
 
+    old_preservation_status = flower.preservation_status
+    old_preservation_label = PRESERVATION_STATUS_LABEL.get(old_preservation_status)
+    old_bucket_id = str(flower.bucket.id) if flower.bucket else None
+
     if "category_id" in update_data:
         category = await FlowerCategory.get(ObjectId(update_data.pop("category_id")))
         if not category:
@@ -206,6 +248,46 @@ async def update_flower(
     flower.updated_at = datetime.utcnow()
     await flower.save()
     await flower.fetch_all_links()
+
+    if "preservation_status" in update_data and old_preservation_status != flower.preservation_status:
+        store_ref = flower.store if isinstance(flower.store, Store) else None
+        bucket_ref = flower.bucket if isinstance(flower.bucket, Bucket) else None
+        await create_flower_status_change_record(
+            target_type=StatusChangeTarget.FLOWER_PRESERVATION,
+            target_id=str(flower.id),
+            old_status=old_preservation_status.value,
+            new_status=flower.preservation_status.value,
+            old_label=old_preservation_label,
+            new_label=PRESERVATION_STATUS_LABEL.get(flower.preservation_status),
+            current_user=current_user,
+            store=store_ref,
+            bucket=bucket_ref,
+            flower=flower,
+        )
+
+    new_bucket_id = str(flower.bucket.id) if flower.bucket else None
+    if old_bucket_id != new_bucket_id:
+        store_ref = flower.store if isinstance(flower.store, Store) else None
+        bucket_ref = flower.bucket if isinstance(flower.bucket, Bucket) else None
+        old_bucket_code = ""
+        new_bucket_code = bucket_ref.bucket_code if bucket_ref else "无"
+        if old_bucket_id:
+            old_bucket = await Bucket.get(ObjectId(old_bucket_id))
+            if old_bucket:
+                old_bucket_code = old_bucket.bucket_code
+        await create_flower_status_change_record(
+            target_type=StatusChangeTarget.FLOWER_BUCKET,
+            target_id=str(flower.id),
+            old_status=old_bucket_id or "none",
+            new_status=new_bucket_id or "none",
+            old_label=old_bucket_code or "无",
+            new_label=new_bucket_code,
+            current_user=current_user,
+            store=store_ref,
+            bucket=bucket_ref,
+            flower=flower,
+        )
+
     return flower_to_response(flower)
 
 

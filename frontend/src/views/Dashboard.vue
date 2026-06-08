@@ -56,7 +56,7 @@
         <v-card
           elevation="2"
           rounded="lg"
-          :color="warningStats.total > 0 ? 'error' : 'warning'"
+          :color="warningStats.pending > 0 ? 'error' : warningStats.handling > 0 ? 'warning' : 'success'"
           theme="dark"
           class="stat-card"
           @click="scrollToWarnings"
@@ -65,9 +65,14 @@
           <v-card-text>
             <div class="d-flex align-center justify-space-between">
               <div>
-                <div class="text-caption text-opacity-75">待处理预警</div>
+                <div class="text-caption text-opacity-75">预警总数</div>
                 <div class="text-h4 font-weight-bold mt-2">
                   {{ warningStats.total }}
+                </div>
+                <div class="text-caption mt-1 d-flex" style="gap: 12px">
+                  <span>待处理 {{ warningStats.pending }}</span>
+                  <span>处理中 {{ warningStats.handling }}</span>
+                  <span>已解决 {{ warningStats.resolved }}</span>
                 </div>
               </div>
               <v-badge color="white" :content="warningStats.high" offset-x="-4" offset-y="4">
@@ -86,16 +91,33 @@
           <div>
             <v-card-title class="text-subtitle-1">
               <v-icon start color="error">mdi-alert-circle</v-icon>
-              待处理预警列表
+              智能预警管理
             </v-card-title>
             <v-card-subtitle>
-              液位过低、花材萎蔫、入桶超时、损耗过高自动预警
+              液位过低、花材萎蔫、入桶超时、损耗过高自动预警，可标记处理进度
             </v-card-subtitle>
           </div>
-          <div class="d-flex align-center" style="gap: 8px">
+          <div class="d-flex align-center flex-wrap" style="gap: 8px">
             <v-chip
               v-for="stat in [
-                { key: 'total', label: '全部', color: 'primary' },
+                { key: '', label: '全部', color: 'primary' },
+                { key: 'pending', label: '待处理', color: 'error' },
+                { key: 'handling', label: '处理中', color: 'warning' },
+                { key: 'resolved', label: '已解决', color: 'success' },
+              ]"
+              :key="'status-' + stat.key"
+              size="small"
+              variant="tonal"
+              :color="warningStatusFilter === stat.key ? stat.color : 'default'"
+              @click="warningStatusFilter = stat.key"
+              style="cursor: pointer"
+            >
+              {{ stat.label }}
+              <span class="ms-1 font-weight-bold">({{ warningStats[stat.key || 'total'] }})</span>
+            </v-chip>
+            <v-divider vertical class="mx-1" style="height: 24px" />
+            <v-chip
+              v-for="stat in [
                 { key: 'low_liquid', label: '液位低', color: 'info' },
                 { key: 'wilted', label: '萎蔫', color: 'error' },
                 { key: 'long_in_bucket', label: '超时', color: 'warning' },
@@ -104,8 +126,8 @@
               :key="stat.key"
               size="small"
               variant="tonal"
-              :color="warningFilter === stat.key ? stat.color : 'default'"
-              @click="warningFilter = warningFilter === stat.key ? '' : stat.key"
+              :color="warningTypeFilter === stat.key ? stat.color : 'default'"
+              @click="warningTypeFilter = warningTypeFilter === stat.key ? '' : stat.key"
               style="cursor: pointer"
             >
               {{ stat.label }}
@@ -128,11 +150,13 @@
           <tr>
             <th>级别</th>
             <th>类型</th>
+            <th>状态</th>
             <th>门店</th>
             <th>花桶</th>
             <th>花材</th>
             <th>预警信息</th>
-            <th>当前值 / 阈值</th>
+            <th>当前值/阈值</th>
+            <th>处理人</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -160,6 +184,19 @@
                 {{ w.warning_type_label }}
               </v-chip>
             </td>
+            <td>
+              <v-chip
+                size="small"
+                variant="flat"
+                :color="w.status === 'pending' ? 'error' : w.status === 'handling' ? 'warning' : 'success'"
+                theme="dark"
+              >
+                <v-icon start size="14">
+                  {{ w.status === 'pending' ? 'mdi-clock-outline' : w.status === 'handling' ? 'mdi-cog' : 'mdi-check' }}
+                </v-icon>
+                {{ w.status_label }}
+              </v-chip>
+            </td>
             <td>{{ w.store_name || '-' }}</td>
             <td>{{ w.bucket_code || '-' }}</td>
             <td>
@@ -169,47 +206,92 @@
               </span>
               <span v-else>-</span>
             </td>
-            <td class="font-weight-medium">{{ w.message }}</td>
+            <td class="font-weight-medium">
+              <div>{{ w.message }}</div>
+              <div v-if="w.handle_note" class="text-caption text-medium-emphasis mt-1">
+                <v-icon size="12">mdi-note-text</v-icon>
+                处理备注：{{ w.handle_note }}
+              </div>
+            </td>
             <td>
               <span :class="w.severity === 'high' ? 'text-error' : 'text-warning'">
                 {{ w.current_value }}{{ w.unit }}
               </span>
               <span class="text-medium-emphasis"> / {{ w.threshold }}{{ w.unit }}</span>
             </td>
-            <td class="text-center">
-              <v-btn
-                v-if="w.warning_type === 'low_liquid'"
-                variant="text"
-                size="small"
-                color="primary"
-                :to="`/records?bucket_id=${w.bucket_id}&tab=preservation`"
-              >
-                去补液
-              </v-btn>
-              <v-btn
-                v-else-if="w.warning_type === 'wilted' || w.warning_type === 'long_in_bucket'"
-                variant="text"
-                size="small"
-                color="primary"
-                :to="`/flowers?flower_id=${w.flower_id}`"
-              >
-                查看花材
-              </v-btn>
-              <v-btn
-                v-else-if="w.warning_type === 'high_loss'"
-                variant="text"
-                size="small"
-                color="primary"
-                :to="`/trace?store_id=${w.store_id}`"
-              >
-                查看损耗
-              </v-btn>
+            <td>
+              <div v-if="w.handler" class="text-caption">
+                <div>{{ w.handler }}</div>
+                <div class="text-medium-emphasis">{{ w.handled_at ? formatDate(w.handled_at) : '' }}</div>
+              </div>
+              <span v-else class="text-medium-emphasis">-</span>
+            </td>
+            <td>
+              <div class="d-flex" style="gap: 4px">
+                <v-btn
+                  v-if="w.warning_type === 'low_liquid'"
+                  variant="text"
+                  size="small"
+                  color="primary"
+                  :to="`/records?bucket_id=${w.bucket_id}&tab=preservation`"
+                >
+                  补液
+                </v-btn>
+                <v-btn
+                  v-else-if="w.warning_type === 'wilted' || w.warning_type === 'long_in_bucket'"
+                  variant="text"
+                  size="small"
+                  color="primary"
+                  :to="`/flowers?flower_id=${w.flower_id}`"
+                >
+                  查看
+                </v-btn>
+                <v-btn
+                  v-else-if="w.warning_type === 'high_loss'"
+                  variant="text"
+                  size="small"
+                  color="primary"
+                  :to="`/trace?store_id=${w.store_id}`"
+                >
+                  追溯
+                </v-btn>
+                <v-menu>
+                  <template #activator="{ props }">
+                    <v-btn variant="text" size="small" color="secondary" v-bind="props">
+                      <v-icon start>mdi-pencil-outline</v-icon>处理
+                    </v-btn>
+                  </template>
+                  <v-list density="compact" min-width="160">
+                    <v-list-item
+                      v-if="w.status !== 'pending'"
+                      @click="openHandleDialog(w, 'pending')"
+                    >
+                      <template #prepend><v-icon color="error">mdi-clock-outline</v-icon></template>
+                      <v-list-item-title>标记为待处理</v-list-item-title>
+                    </v-list-item>
+                    <v-list-item
+                      v-if="w.status !== 'handling'"
+                      @click="openHandleDialog(w, 'handling')"
+                    >
+                      <template #prepend><v-icon color="warning">mdi-cog</v-icon></template>
+                      <v-list-item-title>标记为处理中</v-list-item-title>
+                    </v-list-item>
+                    <v-list-item
+                      v-if="w.status !== 'resolved'"
+                      @click="openHandleDialog(w, 'resolved')"
+                    >
+                      <template #prepend><v-icon color="success">mdi-check</v-icon></template>
+                      <v-list-item-title>标记为已解决</v-list-item-title>
+                    </v-list-item>
+                  </v-list>
+                </v-menu>
+              </div>
             </td>
           </tr>
           <tr v-if="filteredWarnings.length === 0">
-            <td colspan="8" class="text-center text-medium-emphasis py-8">
+            <td colspan="10" class="text-center text-medium-emphasis py-8">
               <v-icon size="32" class="mb-2">mdi-check-circle</v-icon>
-              <div>暂无待处理预警</div>
+              <div>暂无预警记录</div>
             </td>
           </tr>
         </tbody>
@@ -285,7 +367,7 @@
         <v-card elevation="2" rounded="lg">
           <v-card-item>
             <v-card-title class="text-subtitle-1">门店损耗排行</v-card-title>
-            <v-card-subtitle>按损耗数量排序</v-card-subtitle>
+            <v-card-subtitle>近7天损耗率综合排名（损耗率=近7天损耗/(损耗+库存)）</v-card-subtitle>
           </v-card-item>
           <v-divider />
           <v-table>
@@ -294,8 +376,8 @@
                 <th>排名</th>
                 <th>门店</th>
                 <th>负责人</th>
-                <th>损耗数量</th>
-                <th>损耗次数</th>
+                <th>近7天损耗</th>
+                <th>损耗率</th>
                 <th>当前库存</th>
               </tr>
             </thead>
@@ -312,8 +394,17 @@
                 </td>
                 <td class="font-weight-medium">{{ item.store_name }}</td>
                 <td>{{ item.manager || '-' }}</td>
-                <td class="text-error font-weight-medium">{{ item.total_loss_quantity }} 枝</td>
-                <td>{{ item.total_loss_count }}</td>
+                <td class="text-error font-weight-medium">{{ item.recent_loss_quantity_7d || 0 }} 枝</td>
+                <td>
+                  <v-chip
+                    size="small"
+                    variant="flat"
+                    :color="(item.loss_rate_7d || 0) >= 15 ? 'error' : (item.loss_rate_7d || 0) >= 8 ? 'warning' : 'success'"
+                    theme="dark"
+                  >
+                    {{ item.loss_rate_7d || 0 }}%
+                  </v-chip>
+                </td>
                 <td>{{ item.current_flower_quantity }} 枝</td>
               </tr>
               <tr v-if="lossRanking.length === 0">
@@ -381,6 +472,63 @@
         </v-card>
       </v-col>
     </v-row>
+
+    <!-- 预警处理对话框 -->
+    <v-dialog v-model="handleDialog.show" max-width="480">
+      <v-card rounded="lg">
+        <v-card-item>
+          <v-card-title>处理预警</v-card-title>
+          <v-card-subtitle>
+            更新状态：
+            <v-chip
+              size="small"
+              :color="handleDialog.target?.status === 'pending' ? 'error' : handleDialog.target?.status === 'handling' ? 'warning' : 'success'"
+              variant="flat"
+              class="ms-2"
+              theme="dark"
+            >
+              {{ handleDialog.target?.status_label }}
+            </v-chip>
+            <v-icon class="mx-2">mdi-arrow-right</v-icon>
+            <v-chip
+              size="small"
+              :color="handleDialog.newStatus === 'pending' ? 'error' : handleDialog.newStatus === 'handling' ? 'warning' : 'success'"
+              variant="flat"
+              theme="dark"
+            >
+              {{ handleDialog.newStatus === 'pending' ? '待处理' : handleDialog.newStatus === 'handling' ? '处理中' : '已解决' }}
+            </v-chip>
+          </v-card-subtitle>
+        </v-card-item>
+        <v-divider />
+        <v-card-text>
+          <v-alert
+            v-if="handleDialog.target"
+            type="info"
+            variant="tonal"
+            density="comfortable"
+            class="mb-4"
+          >
+            <v-icon start>mdi-information</v-icon>
+            {{ handleDialog.target.message }}
+          </v-alert>
+          <v-textarea
+            v-model="handleDialog.note"
+            label="处理备注（可选）"
+            variant="outlined"
+            rows="3"
+            placeholder="请描述处理措施或说明..."
+          />
+        </v-card-text>
+        <v-divider />
+        <v-card-actions class="justify-end">
+          <v-btn variant="text" @click="handleDialog.show = false">取消</v-btn>
+          <v-btn color="primary" variant="flat" @click="confirmHandle">
+            <v-icon start>mdi-check</v-icon>确认更新
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -389,7 +537,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, Title } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
 import { dashboardApi, type DashboardSummary, type BucketTurnover, type CategoryDistribution, type StoreLossRanking, type RecentRecord } from '@/api/dashboard'
-import type { Warning, WarningType, WarningSeverity } from '@/types'
+import type { Warning, WarningType, WarningSeverity, WarningStatusType } from '@/types'
 import dayjs from 'dayjs'
 
 ChartJS.register(ArcElement, Tooltip, Legend, Title)
@@ -411,12 +559,28 @@ const lossRanking = ref<StoreLossRanking[]>([])
 const recentRecords = ref<RecentRecord[]>([])
 
 const warnings = ref<Warning[]>([])
-const warningFilter = ref('')
+const warningStatusFilter = ref('')
+const warningTypeFilter = ref('')
 const warningsCard = ref()
+
+const handleDialog = reactive<{
+  show: boolean
+  target: Warning | null
+  newStatus: WarningStatusType
+  note: string
+}>({
+  show: false,
+  target: null,
+  newStatus: 'handling',
+  note: '',
+})
 
 const warningStats = computed(() => {
   const stats: Record<string, number> = {
     total: warnings.value.length,
+    pending: 0,
+    handling: 0,
+    resolved: 0,
     high: 0,
     medium: 0,
     low: 0,
@@ -426,6 +590,7 @@ const warningStats = computed(() => {
     high_loss: 0,
   }
   for (const w of warnings.value) {
+    stats[w.status] = (stats[w.status] || 0) + 1
     stats[w.severity] = (stats[w.severity] || 0) + 1
     stats[w.warning_type] = (stats[w.warning_type] || 0) + 1
   }
@@ -433,10 +598,14 @@ const warningStats = computed(() => {
 })
 
 const filteredWarnings = computed(() => {
-  if (!warningFilter.value || warningFilter.value === 'total') {
-    return warnings.value
+  let list = warnings.value
+  if (warningStatusFilter.value) {
+    list = list.filter(w => w.status === warningStatusFilter.value)
   }
-  return warnings.value.filter(w => w.warning_type === warningFilter.value)
+  if (warningTypeFilter.value) {
+    list = list.filter(w => w.warning_type === warningTypeFilter.value)
+  }
+  return list
 })
 
 const topTurnover = computed(() => turnoverData.value.slice(0, 10))
@@ -510,6 +679,32 @@ function formatDate(d: string) {
 
 function scrollToWarnings() {
   warningsCard.value?.scrollIntoView({ behavior: 'smooth' })
+}
+
+function openHandleDialog(w: Warning, status: WarningStatusType) {
+  handleDialog.show = true
+  handleDialog.target = w
+  handleDialog.newStatus = status
+  handleDialog.note = w.handle_note || ''
+}
+
+async function confirmHandle() {
+  if (!handleDialog.target) return
+  try {
+    const updated = await dashboardApi.handleWarning({
+      warning_id: handleDialog.target.warning_id,
+      status: handleDialog.newStatus,
+      note: handleDialog.note,
+    })
+    const idx = warnings.value.findIndex(w => w.warning_id === updated.warning_id)
+    if (idx !== -1) {
+      warnings.value[idx] = updated
+    }
+  } finally {
+    handleDialog.show = false
+    handleDialog.target = null
+    handleDialog.note = ''
+  }
 }
 
 async function loadWarnings() {

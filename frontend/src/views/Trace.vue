@@ -9,7 +9,7 @@
               操作轨迹追踪
             </v-card-title>
             <v-card-subtitle>
-              按门店、花桶、花材维度查询完整操作轨迹：入桶、回桶、补液、损耗
+              按门店、花桶、花材维度查询完整操作轨迹：入桶、回桶、补液、损耗、状态变更
             </v-card-subtitle>
           </div>
         </div>
@@ -213,19 +213,22 @@
                 <span v-else>-</span>
               </td>
               <td>
-                <span
-                  :class="
-                    item.operation_type === 'loss'
-                      ? 'text-error'
-                      : item.operation_type === 'preservation' || item.operation_type === 'in_bucket'
-                      ? 'text-success'
-                      : ''
-                  "
-                  class="font-weight-medium"
-                >
-                  {{ item.operation_type === 'loss' ? '-' : item.operation_type === 'out_bucket' ? '-' : '+' }}
-                  {{ item.quantity }} {{ item.quantity_unit }}
-                </span>
+                <template v-if="item.operation_type !== 'status_change'">
+                  <span
+                    :class="
+                      item.operation_type === 'loss'
+                        ? 'text-error'
+                        : item.operation_type === 'preservation' || item.operation_type === 'in_bucket'
+                        ? 'text-success'
+                        : ''
+                    "
+                    class="font-weight-medium"
+                  >
+                    {{ item.operation_type === 'loss' ? '-' : item.operation_type === 'out_bucket' ? '-' : '+' }}
+                    {{ item.quantity }} {{ item.quantity_unit }}
+                  </span>
+                </template>
+                <span v-else class="text-medium-emphasis">-</span>
               </td>
               <td class="text-caption">{{ item.detail }}</td>
               <td>{{ item.operator || '-' }}</td>
@@ -319,19 +322,21 @@
                       </div>
                     </div>
                     <div class="text-right">
-                      <div
-                        class="text-h6 font-weight-bold"
-                        :class="
-                          item.operation_type === 'loss'
-                            ? 'text-error'
-                            : item.operation_type === 'preservation' || item.operation_type === 'in_bucket'
-                            ? 'text-success'
-                            : ''
-                        "
-                      >
-                        {{ item.operation_type === 'loss' ? '-' : item.operation_type === 'out_bucket' ? '-' : '+' }}
-                        {{ item.quantity }} {{ item.quantity_unit }}
-                      </div>
+                      <template v-if="item.operation_type !== 'status_change'">
+                        <div
+                          class="text-h6 font-weight-bold"
+                          :class="
+                            item.operation_type === 'loss'
+                              ? 'text-error'
+                              : item.operation_type === 'preservation' || item.operation_type === 'in_bucket'
+                              ? 'text-success'
+                              : ''
+                          "
+                        >
+                          {{ item.operation_type === 'loss' ? '-' : item.operation_type === 'out_bucket' ? '-' : '+' }}
+                          {{ item.quantity }} {{ item.quantity_unit }}
+                        </div>
+                      </template>
                     </div>
                   </div>
                 </v-card-item>
@@ -457,6 +462,7 @@ const operationTypeOptions = [
   { label: '回桶', value: 'out_bucket' },
   { label: '补液', value: 'preservation' },
   { label: '损耗', value: 'loss' },
+  { label: '状态变更', value: 'status_change' },
 ]
 
 const opColor: Record<OperationType, string> = {
@@ -464,6 +470,7 @@ const opColor: Record<OperationType, string> = {
   out_bucket: 'info',
   preservation: 'success',
   loss: 'error',
+  status_change: 'secondary',
 }
 
 const opIcon: Record<OperationType, string> = {
@@ -471,6 +478,7 @@ const opIcon: Record<OperationType, string> = {
   out_bucket: 'mdi-arrow-up-bold-box-outline',
   preservation: 'mdi-water-plus-outline',
   loss: 'mdi-alert-circle-outline',
+  status_change: 'mdi-swap-horizontal',
 }
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / (query.page_size || 30))))
@@ -494,6 +502,7 @@ const selectedSummary = computed(() => {
     loss: 0,
   }
   for (const item of data.value) {
+    if (item.operation_type === 'status_change') continue
     if (item.operation_type === 'preservation') {
       summary.preservation += item.quantity
     } else {

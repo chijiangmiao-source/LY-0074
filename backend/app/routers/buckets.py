@@ -3,12 +3,56 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from bson import ObjectId
 from beanie.odm.fields import PydanticObjectId
-from app.models import Bucket, BucketStatus, Store, User
+from app.models import (
+    Bucket,
+    BucketStatus,
+    Store,
+    User,
+    Flower,
+    StatusChangeRecord,
+    StatusChangeTarget,
+)
 from app.schemas.bucket import BucketCreate, BucketUpdate, BucketResponse, BucketStoreInfo
 from app.schemas.common import PaginatedResponse
 from app.services.auth import get_current_active_user
 
 router = APIRouter()
+
+BUCKET_STATUS_LABEL = {
+    BucketStatus.ACTIVE: "启用",
+    BucketStatus.INACTIVE: "停用",
+    BucketStatus.MAINTENANCE: "维修中",
+}
+
+
+async def create_status_change_record(
+    target_type: StatusChangeTarget,
+    target_id: str,
+    old_status: Optional[str],
+    new_status: str,
+    old_label: Optional[str],
+    new_label: str,
+    current_user: User,
+    store: Optional[Store] = None,
+    bucket: Optional[Bucket] = None,
+    flower: Optional[Flower] = None,
+    remark: Optional[str] = None,
+):
+    record = StatusChangeRecord(
+        target_type=target_type,
+        target_id=target_id,
+        store=store,
+        bucket=bucket,
+        flower=flower,
+        old_status=old_status,
+        new_status=new_status,
+        old_label=old_label,
+        new_label=new_label,
+        operator=current_user,
+        operator_name=current_user.full_name or current_user.username,
+        remark=remark,
+    )
+    await record.create()
 
 
 def bucket_to_response(bucket: Bucket) -> dict:
@@ -138,6 +182,9 @@ async def update_bucket(
 
     update_data = bucket_in.model_dump(exclude_unset=True)
 
+    old_status = bucket.status
+    old_status_label = BUCKET_STATUS_LABEL.get(old_status)
+
     if "store_id" in update_data:
         store = await Store.get(ObjectId(update_data.pop("store_id")))
         if not store:
@@ -154,6 +201,21 @@ async def update_bucket(
     bucket.updated_at = datetime.utcnow()
     await bucket.save()
     await bucket.fetch_link(Bucket.store)
+
+    if "status" in update_data and old_status != bucket.status:
+        store_ref = bucket.store if isinstance(bucket.store, Store) else None
+        await create_status_change_record(
+            target_type=StatusChangeTarget.BUCKET_STATUS,
+            target_id=str(bucket.id),
+            old_status=old_status.value,
+            new_status=bucket.status.value,
+            old_label=old_status_label,
+            new_label=BUCKET_STATUS_LABEL.get(bucket.status),
+            current_user=current_user,
+            store=store_ref,
+            bucket=bucket,
+        )
+
     return bucket_to_response(bucket)
 
 
