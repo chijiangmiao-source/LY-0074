@@ -1,29 +1,20 @@
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from bson import ObjectId
+
 from app.models import (
     User,
     EmployeePosition,
     POSITION_LABELS,
     Store,
-    Bucket,
-    Flower,
-    BucketInRecord,
-    BucketOutRecord,
-    PreservationRecord,
-    LossRecord,
-    Warning,
-    WarningStatus,
     ResponsibilityTrace,
     ResponsibilityAction,
-    StatusChangeRecord,
     StatusChangeTarget,
 )
 from app.models.training import (
     CompetencyDimension,
     COMPETENCY_LABELS,
     TrainingCourse,
-    TrainingCourseStatus,
     EmployeeTrainingTask,
     TrainingTaskType,
     TRAINING_TASK_TYPE_LABELS,
@@ -33,7 +24,14 @@ from app.models.training import (
     CompetencyScoreItem,
     HighFrequencyError,
 )
-from app.services.performance import build_date_query, calculate_workload, calculate_timeliness, calculate_loss_stats
+from app.services.stats_service import (
+    build_date_query,
+    resolve_date_range,
+    get_user_store,
+    get_operator_name,
+    BatchRecordLoader,
+    WARNING_HANDLE_OVERDUE_HOURS,
+)
 
 
 COMPETENCY_LEVEL_THRESHOLDS = {
@@ -67,37 +65,19 @@ COMPETENCY_LEVEL_LABELS = {
 }
 
 
-def get_user_store_by_traces(user: User) -> Optional[Store]:
-    traces = ResponsibilityTrace.find(
-        ResponsibilityTrace.operator.id == user.id,
-        fetch_links=True,
-    ).sort("-created_at").limit(5)
-    return None
-
-
 async def analyze_inspection_competency(
     user_id: str,
-    date_query: Optional[Dict[str, Any]],
+    loader: BatchRecordLoader,
 ) -> Dict[str, Any]:
-    uid = ObjectId(user_id)
-    status_query = {"operator": uid}
-    if date_query:
-        status_query["created_at"] = date_query
-    status_query["target_type"] = {
-        "$in": [StatusChangeTarget.BUCKET_STATUS, StatusChangeTarget.FLOWER_PRESERVATION]
-    }
-    inspection_count = await StatusChangeRecord.find(status_query).count()
+    status_records = loader.get_status_records_for_user(user_id)
+    inspection_count = len(status_records)
 
-    overdue_warnings_query = {"handler": uid}
-    if date_query:
-        overdue_warnings_query["created_at"] = date_query
-        overdue_warnings_query["handled_at"] = date_query
-    overdue_warnings = await Warning.find(overdue_warnings_query).to_list()
+    warnings = loader.get_warnings_for_user(user_id)
     overdue_count = 0
-    for w in overdue_warnings:
+    for w in warnings:
         if w.handled_at and w.created_at:
             hours = (w.handled_at - w.created_at).total_seconds() / 3600
-            if hours > 24:
+            if hours > WARNING_HANDLE_OVERDUE_HOURS:
                 overdue_count += 1
 
     error_count = overdue_count
@@ -120,22 +100,10 @@ async def analyze_inspection_competency(
 
 async def analyze_loss_competency(
     user_id: str,
-    date_query: Optional[Dict[str, Any]],
+    loader: BatchRecordLoader,
 ) -> Dict[str, Any]:
-    uid = ObjectId(user_id)
-    user = await User.get(uid)
-    operator_name = (user.full_name or user.username) if user else ""
-
-    loss_query = {"operator_id": uid}
-    if date_query:
-        loss_query["created_at"] = date_query
-    loss_records = await LossRecord.find(loss_query).to_list()
-
-    if not loss_records and operator_name:
-        fallback_loss = dict(loss_query)
-        del fallback_loss["operator_id"]
-        fallback_loss["operator"] = operator_name
-        loss_records = await LossRecord.find(fallback_loss).to_list()
+    operator_name = await get_operator_name(user_id)
+    loss_records = loader.get_loss_records_for_user(user_id, operator_name)
 
     operations_count = len(loss_records)
     total_qty = sum(r.quantity for r in loss_records)
@@ -172,16 +140,9 @@ async def analyze_loss_competency(
 
 async def analyze_warning_competency(
     user_id: str,
-    date_query: Optional[Dict[str, Any]],
+    loader: BatchRecordLoader,
 ) -> Dict[str, Any]:
-    uid = ObjectId(user_id)
-    warning_query = {}
-    warning_query["handler"] = uid
-    if date_query and "handled_at" in date_query:
-        warning_query["handled_at"] = date_query["handled_at"]
-    elif date_query and "$gte" in date_query:
-        warning_query["created_at"] = date_query
-    warnings = await Warning.find(warning_query).to_list()
+    warnings = loader.get_warnings_for_user(user_id)
 
     operations_count = len(warnings)
     overdue_count = 0
@@ -190,7 +151,7 @@ async def analyze_warning_competency(
         if w.handled_at and w.created_at:
             hours = (w.handled_at - w.created_at).total_seconds() / 3600
             avg_hours_list.append(hours)
-            if hours > 24:
+            if hours > WARNING_HANDLE_OVERDUE_HOURS:
                 overdue_count += 1
 
     avg_handle_hours = round(sum(avg_hours_list) / len(avg_hours_list), 2) if avg_hours_list else 0.0
@@ -216,25 +177,15 @@ async def analyze_warning_competency(
 async def analyze_operation_competency(
     dimension: CompetencyDimension,
     user_id: str,
-    date_query: Optional[Dict[str, Any]],
+    loader: BatchRecordLoader,
 ) -> Dict[str, Any]:
-    uid = ObjectId(user_id)
-    user = await User.get(uid)
-    operator_name = (user.full_name or user.username) if user else ""
+    operator_name = await get_operator_name(user_id)
 
     operations_count = 0
     error_count = 0
 
     if dimension == CompetencyDimension.IN_BUCKET:
-        query = {"operator_id": uid}
-        if date_query:
-            query["created_at"] = date_query
-        records = await BucketInRecord.find(query).to_list()
-        if not records and operator_name:
-            fallback = dict(query)
-            del fallback["operator_id"]
-            fallback["operator"] = operator_name
-            records = await BucketInRecord.find(fallback).to_list()
+        records = loader.get_in_records_for_user(user_id, operator_name)
         operations_count = len(records)
         for r in records:
             if r.quantity > 50:
@@ -243,30 +194,14 @@ async def analyze_operation_competency(
                 error_count += 1
 
     elif dimension == CompetencyDimension.OUT_BUCKET:
-        query = {"operator_id": uid}
-        if date_query:
-            query["created_at"] = date_query
-        records = await BucketOutRecord.find(query).to_list()
-        if not records and operator_name:
-            fallback = dict(query)
-            del fallback["operator_id"]
-            fallback["operator"] = operator_name
-            records = await BucketOutRecord.find(fallback).to_list()
+        records = loader.get_out_records_for_user(user_id, operator_name)
         operations_count = len(records)
         for r in records:
             if r.remark and ("错误" in r.remark or "纠正" in r.remark or "遗漏" in r.remark):
                 error_count += 1
 
     elif dimension == CompetencyDimension.PRESERVATION:
-        query = {"operator_id": uid}
-        if date_query:
-            query["created_at"] = date_query
-        records = await PreservationRecord.find(query).to_list()
-        if not records and operator_name:
-            fallback = dict(query)
-            del fallback["operator_id"]
-            fallback["operator"] = operator_name
-            records = await PreservationRecord.find(fallback).to_list()
+        records = loader.get_pres_records_for_user(user_id, operator_name)
         operations_count = len(records)
         for r in records:
             diff = abs(r.after_quantity - r.previous_quantity - r.supplement_quantity)
@@ -297,23 +232,21 @@ async def assess_employee_competency(
     end_date: Optional[str] = None,
     store_id: Optional[str] = None,
 ) -> EmployeeCompetencyAssessment:
+    ps, pe = resolve_date_range(start_date, end_date)
     date_query = build_date_query(start_date, end_date)
-    ps = start_date or (datetime.utcnow() - timedelta(days=30)).isoformat()[:10]
-    pe = end_date or datetime.utcnow().isoformat()[:10]
 
-    workload = await calculate_workload(str(user.id), date_query, store_id)
-    timeliness = await calculate_timeliness(str(user.id), date_query)
-    loss_stats = await calculate_loss_stats(str(user.id), date_query, store_id)
+    loader = BatchRecordLoader(date_query, store_id)
+    await loader.load_all()
 
     competency_scores: List[CompetencyScoreItem] = []
 
     dimensions = [
-        (CompetencyDimension.IN_BUCKET, lambda: analyze_operation_competency(CompetencyDimension.IN_BUCKET, str(user.id), date_query)),
-        (CompetencyDimension.OUT_BUCKET, lambda: analyze_operation_competency(CompetencyDimension.OUT_BUCKET, str(user.id), date_query)),
-        (CompetencyDimension.PRESERVATION, lambda: analyze_operation_competency(CompetencyDimension.PRESERVATION, str(user.id), date_query)),
-        (CompetencyDimension.LOSS_HANDLING, lambda: analyze_loss_competency(str(user.id), date_query)),
-        (CompetencyDimension.WARNING_HANDLING, lambda: analyze_warning_competency(str(user.id), date_query)),
-        (CompetencyDimension.INSPECTION, lambda: analyze_inspection_competency(str(user.id), date_query)),
+        (CompetencyDimension.IN_BUCKET, lambda: analyze_operation_competency(CompetencyDimension.IN_BUCKET, str(user.id), loader)),
+        (CompetencyDimension.OUT_BUCKET, lambda: analyze_operation_competency(CompetencyDimension.OUT_BUCKET, str(user.id), loader)),
+        (CompetencyDimension.PRESERVATION, lambda: analyze_operation_competency(CompetencyDimension.PRESERVATION, str(user.id), loader)),
+        (CompetencyDimension.LOSS_HANDLING, lambda: analyze_loss_competency(str(user.id), loader)),
+        (CompetencyDimension.WARNING_HANDLING, lambda: analyze_warning_competency(str(user.id), loader)),
+        (CompetencyDimension.INSPECTION, lambda: analyze_inspection_competency(str(user.id), loader)),
     ]
 
     for dim, analyzer in dimensions:
@@ -357,15 +290,9 @@ async def assess_employee_competency(
     user_store = store_id
     store_obj = None
     if not user_store:
-        traces = await ResponsibilityTrace.find(
-            ResponsibilityTrace.operator.id == user.id,
-            fetch_links=True,
-        ).sort("-created_at").limit(5).to_list()
-        for t in traces:
-            if isinstance(t.store, Store):
-                store_obj = t.store
-                user_store = str(t.store.id)
-                break
+        store_obj = await get_user_store(user)
+        if store_obj:
+            user_store = str(store_obj.id)
 
     if user_store and not store_obj:
         store_obj = await Store.get(ObjectId(user_store))
@@ -490,15 +417,9 @@ async def create_training_task(
 
     store_obj = None
     store_name = None
-    traces = await ResponsibilityTrace.find(
-        ResponsibilityTrace.operator.id == user.id,
-        fetch_links=True,
-    ).sort("-created_at").limit(5).to_list()
-    for t in traces:
-        if isinstance(t.store, Store):
-            store_obj = t.store
-            store_name = t.store.store_name
-            break
+    store_obj = await get_user_store(user)
+    if store_obj:
+        store_name = store_obj.store_name
 
     course = None
     if req_data.get("course_id"):
@@ -607,8 +528,7 @@ async def get_training_stats(
     store_id: Optional[str] = None,
     position: Optional[str] = None,
 ) -> Dict[str, Any]:
-    ps = start_date or (datetime.utcnow() - timedelta(days=30)).isoformat()[:10]
-    pe = end_date or datetime.utcnow().isoformat()[:10]
+    ps, pe = resolve_date_range(start_date, end_date)
 
     task_query = {}
     assessment_query = {}
@@ -740,8 +660,7 @@ async def analyze_high_frequency_errors(
     store_id: Optional[str] = None,
     min_occurrences: int = 3,
 ) -> List[Dict[str, Any]]:
-    ps = start_date or (datetime.utcnow() - timedelta(days=30)).isoformat()[:10]
-    pe = end_date or datetime.utcnow().isoformat()[:10]
+    ps, pe = resolve_date_range(start_date, end_date)
     dt_start = datetime.fromisoformat(ps)
     dt_end = datetime.fromisoformat(pe) + timedelta(days=1)
 

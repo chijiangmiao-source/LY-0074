@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from bson import ObjectId
+
 from app.models import (
     User,
     EmployeePosition,
@@ -8,41 +9,23 @@ from app.models import (
     Store,
     Bucket,
     Flower,
-    BucketInRecord,
-    BucketOutRecord,
-    PreservationRecord,
-    LossRecord,
     Warning,
-    WarningStatus,
     ResponsibilityTrace,
     ResponsibilityTargetType,
     ResponsibilityAction,
-    StatusChangeRecord,
-    StatusChangeTarget,
 )
-
-
-WARNING_HANDLE_OVERDUE_HOURS = 24
-
-
-def build_date_query(start_date: Optional[str], end_date: Optional[str]) -> Dict[str, Any]:
-    date_query = {}
-    if start_date:
-        date_query["$gte"] = datetime.fromisoformat(start_date)
-    if end_date:
-        date_query["$lte"] = datetime.fromisoformat(end_date) + timedelta(days=1)
-    return date_query if date_query else None
-
-
-async def get_user_store(user: User) -> Optional[Store]:
-    traces = await ResponsibilityTrace.find(
-        ResponsibilityTrace.operator.id == user.id,
-        fetch_links=True,
-    ).sort("-created_at").limit(5).to_list()
-    for t in traces:
-        if isinstance(t.store, Store):
-            return t.store
-    return None
+from app.services.stats_service import (
+    build_date_query,
+    resolve_date_range,
+    get_user_store,
+    get_user_store_id,
+    get_operator_name,
+    BatchRecordLoader,
+    calculate_workload_from_records,
+    calculate_timeliness_from_warnings,
+    calculate_loss_stats_from_records,
+    calculate_performance_score,
+)
 
 
 async def calculate_workload(
@@ -61,112 +44,38 @@ async def calculate_workload(
             "total_operations": 0,
         }
 
-    uid = ObjectId(user_id)
-    user = await User.get(uid)
-    operator_name = (user.full_name or user.username) if user else ""
+    operator_name = await get_operator_name(user_id)
+    loader = BatchRecordLoader(date_query, store_id)
+    await loader.load_all()
 
-    in_query = {"operator_id": uid}
-    out_query = {"operator_id": uid}
-    pres_query = {"operator_id": uid}
-    loss_query = {"operator_id": uid}
+    in_records = loader.get_in_records_for_user(user_id, operator_name)
+    out_records = loader.get_out_records_for_user(user_id, operator_name)
+    pres_records = loader.get_pres_records_for_user(user_id, operator_name)
+    loss_records = loader.get_loss_records_for_user(user_id, operator_name)
+    warnings = loader.get_warnings_for_user(user_id)
+    status_records = loader.get_status_records_for_user(user_id)
 
-    if date_query:
-        in_query["created_at"] = date_query
-        out_query["created_at"] = date_query
-        pres_query["created_at"] = date_query
-        loss_query["created_at"] = date_query
-
-    if store_id:
-        pres_query["store"] = ObjectId(store_id)
-        loss_query["store"] = ObjectId(store_id)
-
-    in_count = await BucketInRecord.find(in_query).count()
-    out_count = await BucketOutRecord.find(out_query).count()
-    pres_count = await PreservationRecord.find(pres_query).count()
-    loss_count = await LossRecord.find(loss_query).count()
-
-    if not in_count and operator_name:
-        fallback_in = dict(in_query)
-        del fallback_in["operator_id"]
-        fallback_in["operator"] = operator_name
-        in_count = await BucketInRecord.find(fallback_in).count()
-    if not out_count and operator_name:
-        fallback_out = dict(out_query)
-        del fallback_out["operator_id"]
-        fallback_out["operator"] = operator_name
-        out_count = await BucketOutRecord.find(fallback_out).count()
-    if not pres_count and operator_name:
-        fallback_pres = dict(pres_query)
-        del fallback_pres["operator_id"]
-        fallback_pres["operator"] = operator_name
-        pres_count = await PreservationRecord.find(fallback_pres).count()
-    if not loss_count and operator_name:
-        fallback_loss = dict(loss_query)
-        del fallback_loss["operator_id"]
-        fallback_loss["operator"] = operator_name
-        loss_count = await LossRecord.find(fallback_loss).count()
-
-    warning_query = {}
-    if date_query:
-        warning_query["handled_at"] = date_query
-    warning_query["handler"] = uid
-    warning_count = await Warning.find(warning_query).count()
-
-    status_query = {"operator": uid}
-    if date_query:
-        status_query["created_at"] = date_query
-    status_query["target_type"] = {
-        "$in": [StatusChangeTarget.BUCKET_STATUS, StatusChangeTarget.FLOWER_PRESERVATION]
-    }
-    inspection_count = await StatusChangeRecord.find(status_query).count()
-
-    total = in_count + out_count + pres_count + loss_count + warning_count + inspection_count
-
-    return {
-        "in_bucket_count": in_count,
-        "out_bucket_count": out_count,
-        "preservation_count": pres_count,
-        "loss_count": loss_count,
-        "warning_handled_count": warning_count,
-        "inspection_count": inspection_count,
-        "total_operations": total,
-    }
+    return calculate_workload_from_records(
+        in_records, out_records, pres_records, loss_records, warnings, status_records
+    )
 
 
 async def calculate_timeliness(
     user_id: Optional[str],
     date_query: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    on_time = 0
-    overdue = 0
-    handle_hours_list: List[float] = []
+    if not user_id:
+        return {
+            "on_time_count": 0,
+            "overdue_count": 0,
+            "on_time_rate": 100.0,
+            "avg_warning_handle_hours": 0.0,
+        }
 
-    warning_query = {}
-    if user_id:
-        warning_query["handler"] = ObjectId(user_id)
-    if date_query and "handled_at" in date_query:
-        warning_query["handled_at"] = date_query["handled_at"]
-    warnings = await Warning.find(warning_query, fetch_links=True).to_list()
-
-    for w in warnings:
-        if w.handled_at and w.created_at:
-            hours = (w.handled_at - w.created_at).total_seconds() / 3600
-            handle_hours_list.append(hours)
-            if hours <= WARNING_HANDLE_OVERDUE_HOURS:
-                on_time += 1
-            else:
-                overdue += 1
-
-    total = on_time + overdue
-    on_time_rate = round(on_time / total * 100, 2) if total > 0 else 100.0
-    avg_hours = round(sum(handle_hours_list) / len(handle_hours_list), 2) if handle_hours_list else 0.0
-
-    return {
-        "on_time_count": on_time,
-        "overdue_count": overdue,
-        "on_time_rate": on_time_rate,
-        "avg_warning_handle_hours": avg_hours,
-    }
+    loader = BatchRecordLoader(date_query)
+    await loader.load_all()
+    warnings = loader.get_warnings_for_user(user_id)
+    return calculate_timeliness_from_warnings(warnings)
 
 
 async def calculate_loss_stats(
@@ -181,65 +90,34 @@ async def calculate_loss_stats(
             "loss_rate": 0.0,
         }
 
-    uid = ObjectId(user_id)
-    user = await User.get(uid)
-    operator_name = (user.full_name or user.username) if user else ""
+    operator_name = await get_operator_name(user_id)
+    loader = BatchRecordLoader(date_query, store_id)
+    await loader.load_all()
 
-    loss_query = {"operator_id": uid}
-    if date_query:
-        loss_query["created_at"] = date_query
-    if store_id:
-        loss_query["store"] = ObjectId(store_id)
-
-    loss_records = await LossRecord.find(loss_query).to_list()
-    responsible_qty = sum(r.quantity for r in loss_records)
-
-    if not responsible_qty and operator_name:
-        fallback_loss = dict(loss_query)
-        del fallback_loss["operator_id"]
-        fallback_loss["operator"] = operator_name
-        fallback_records = await LossRecord.find(fallback_loss).to_list()
-        responsible_qty = sum(r.quantity for r in fallback_records)
-
-    all_loss_query = {}
-    if date_query:
-        all_loss_query["created_at"] = date_query
-    if store_id:
-        all_loss_query["store"] = ObjectId(store_id)
-    all_loss_records = await LossRecord.find(all_loss_query).to_list()
-    total_qty = sum(r.quantity for r in all_loss_records)
-
-    loss_rate = round(responsible_qty / total_qty * 100, 2) if total_qty > 0 else 0.0
-
-    return {
-        "total_loss_quantity": total_qty,
-        "responsible_loss_quantity": responsible_qty,
-        "loss_rate": loss_rate,
-    }
+    user_loss = loader.get_loss_records_for_user(user_id, operator_name)
+    return calculate_loss_stats_from_records(user_loss, loader.loss_records)
 
 
-def calculate_performance_score(
-    workload: Dict[str, int],
-    timeliness: Dict[str, Any],
-    loss: Dict[str, Any],
-) -> float:
-    workload_score = min(workload["total_operations"] / 50 * 40, 40)
-    timeliness_score = timeliness["on_time_rate"] / 100 * 35
-    loss_score = max(0, 25 - loss["loss_rate"] * 0.5)
-    return round(workload_score + timeliness_score + loss_score, 2)
-
-
-async def get_employee_performance(
+async def _build_employee_performance_from_loader(
     user: User,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
+    loader: BatchRecordLoader,
     store_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    date_query = build_date_query(start_date, end_date)
+    user_id = str(user.id)
+    operator_name = user.full_name or user.username
 
-    workload = await calculate_workload(str(user.id), date_query, store_id)
-    timeliness = await calculate_timeliness(str(user.id), date_query)
-    loss_stats = await calculate_loss_stats(str(user.id), date_query, store_id)
+    in_records = loader.get_in_records_for_user(user_id, operator_name)
+    out_records = loader.get_out_records_for_user(user_id, operator_name)
+    pres_records = loader.get_pres_records_for_user(user_id, operator_name)
+    loss_records = loader.get_loss_records_for_user(user_id, operator_name)
+    warnings = loader.get_warnings_for_user(user_id)
+    status_records = loader.get_status_records_for_user(user_id)
+
+    workload = calculate_workload_from_records(
+        in_records, out_records, pres_records, loss_records, warnings, status_records
+    )
+    timeliness = calculate_timeliness_from_warnings(warnings)
+    loss_stats = calculate_loss_stats_from_records(loss_records, loader.loss_records)
     score = calculate_performance_score(workload, timeliness, loss_stats)
 
     user_store = store_id
@@ -274,6 +152,18 @@ async def get_employee_performance(
     }
 
 
+async def get_employee_performance(
+    user: User,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    store_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    date_query = build_date_query(start_date, end_date)
+    loader = BatchRecordLoader(date_query, store_id)
+    await loader.load_all()
+    return await _build_employee_performance_from_loader(user, loader, store_id)
+
+
 async def get_performance_ranking(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -286,10 +176,14 @@ async def get_performance_ranking(
         query["position"] = EmployeePosition(position)
 
     users = await User.find(query).to_list()
-    results = []
 
+    date_query = build_date_query(start_date, end_date)
+    loader = BatchRecordLoader(date_query, store_id)
+    await loader.load_all()
+
+    results = []
     for user in users:
-        perf = await get_employee_performance(user, start_date, end_date, store_id)
+        perf = await _build_employee_performance_from_loader(user, loader, store_id)
         if store_id and not perf["store"]:
             continue
         if store_id and perf["store"] and perf["store"]["id"] != store_id:
@@ -534,10 +428,17 @@ async def get_performance_summary(
     end_date: Optional[str] = None,
     store_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    ps, pe = resolve_date_range(start_date, end_date)
+
     users = await User.find(User.is_active == True).to_list()
+
+    date_query = build_date_query(start_date, end_date)
+    loader = BatchRecordLoader(date_query, store_id)
+    await loader.load_all()
+
     performances = []
     for u in users:
-        p = await get_employee_performance(u, start_date, end_date, store_id)
+        p = await _build_employee_performance_from_loader(u, loader, store_id)
         if store_id and p["store"] and p["store"]["id"] != store_id:
             continue
         if store_id and not p["store"]:
@@ -547,9 +448,6 @@ async def get_performance_summary(
     total_ops = sum(p["workload"]["total_operations"] for p in performances)
     avg_on_time = round(sum(p["timeliness"]["on_time_rate"] for p in performances) / len(performances), 2) if performances else 0
     total_loss = sum(p["loss"]["responsible_loss_quantity"] for p in performances)
-
-    ps = start_date or (datetime.utcnow() - timedelta(days=30)).isoformat()[:10]
-    pe = end_date or datetime.utcnow().isoformat()[:10]
 
     return {
         "period_start": ps,
