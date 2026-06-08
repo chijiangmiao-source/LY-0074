@@ -129,3 +129,47 @@ export interface PaginatedResponse<T> {
   page_size: number
   total_pages: number
 }
+
+export type WarningType = 'low_liquid' | 'wilted' | 'long_in_bucket' | 'high_loss'
+export type WarningSeverity = 'high' | 'medium' | 'low'
+
+export interface Warning {
+  warning_id: string
+  warning_type: WarningType
+  warning_type_label: string
+  severity: WarningSeverity
+  store_id?: string
+  store_name: string
+  bucket_id?: string
+  bucket_code?: string
+  flower_id?: string
+  flower_name?: string
+  flower_code?: string
+  message: string
+  current_value: string | number
+  threshold: string | number
+  unit: string
+  created_at: string
+  handled: boolean
+}
+
+export type OperationType = 'in_bucket' | 'out_bucket' | 'preservation' | 'loss'
+
+export interface OperationTrace {
+  trace_id: string
+  operation_type: OperationType
+  operation_type_label: string
+  store_name: string
+  store_id: string
+  bucket_id: string
+  bucket_code: string
+  flower_id: string
+  flower_name: string
+  flower_code: string
+  quantity: number
+  quantity_unit: string
+  operator: string
+  remark: string
+  detail: string
+  created_at: string
+}

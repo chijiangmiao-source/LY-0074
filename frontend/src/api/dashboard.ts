@@ -1,4 +1,5 @@
 import request from './request'
+import type { Warning, OperationTrace, PaginatedResponse } from '@/types'
 
 export interface DashboardSummary {
   total_stores: number
@@ -54,6 +55,22 @@ export interface RecentRecord {
   created_at: string
 }
 
+export interface WarningQuery {
+  store_id?: string
+  warning_type?: string
+  only_pending?: boolean
+}
+
+export interface OperationTraceQuery {
+  store_id?: string
+  bucket_id?: string
+  flower_id?: string
+  start_date?: string
+  end_date?: string
+  page?: number
+  page_size?: number
+}
+
 export const dashboardApi = {
   summary: () => request.get<unknown, DashboardSummary>('/dashboard/summary'),
   bucketTurnover: () => request.get<unknown, BucketTurnover[]>('/dashboard/bucket-turnover'),
@@ -63,4 +80,8 @@ export const dashboardApi = {
     request.get<unknown, StoreLossRanking[]>('/dashboard/store-loss-ranking'),
   recentRecords: (limit = 10) =>
     request.get<unknown, RecentRecord[]>('/dashboard/recent-records', { params: { limit } }),
+  warnings: (params?: WarningQuery) =>
+    request.get<unknown, Warning[]>('/dashboard/warnings', { params }),
+  operationTrace: (params?: OperationTraceQuery) =>
+    request.get<unknown, PaginatedResponse<OperationTrace>>('/dashboard/operation-trace', { params }),
 }

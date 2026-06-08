@@ -11,9 +11,13 @@
 
       <v-spacer />
 
-      <v-btn variant="text" class="me-2">
-        <v-icon start>mdi-bell-outline</v-icon>
-      </v-btn>
+      <router-link to="/dashboard" class="text-decoration-none">
+        <v-btn variant="text" class="me-2">
+          <v-badge color="error" :content="warningCount" offset-x="4" offset-y="-4">
+            <v-icon start>mdi-bell-outline</v-icon>
+          </v-badge>
+        </v-btn>
+      </router-link>
 
       <v-menu offset="12, 12" location="bottom end">
         <template v-slot:activator="{ props }">
@@ -71,13 +75,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { dashboardApi } from '@/api/dashboard'
 
 const auth = useAuthStore()
 const router = useRouter()
 const drawer = ref(true)
+const warningCount = ref(0)
 
 const menuItems = computed(() => [
   { to: '/dashboard', title: '数据看板', icon: 'mdi-view-dashboard' },
@@ -86,7 +92,17 @@ const menuItems = computed(() => [
   { to: '/categories', title: '花材分类', icon: 'mdi-tag-multiple-outline' },
   { to: '/flowers', title: '花材管理', icon: 'mdi-flower-outline' },
   { to: '/records', title: '业务记录', icon: 'mdi-clipboard-list-outline' },
+  { to: '/trace', title: '操作轨迹', icon: 'mdi-history' },
 ])
+
+async function loadWarningCount() {
+  try {
+    const warnings = await dashboardApi.warnings()
+    warningCount.value = warnings.length
+  } catch {}
+}
+
+onMounted(loadWarningCount)
 
 function handleLogout() {
   auth.logout()

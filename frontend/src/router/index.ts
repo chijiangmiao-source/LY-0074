@@ -50,6 +50,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Records.vue'),
         meta: { title: '业务记录', icon: 'mdi-clipboard-list' },
       },
+      {
+        path: 'trace',
+        name: 'Trace',
+        component: () => import('@/views/Trace.vue'),
+        meta: { title: '操作轨迹', icon: 'mdi-history' },
+      },
     ],
   },
   { path: '/:pathMatch(.*)*', redirect: '/dashboard' },

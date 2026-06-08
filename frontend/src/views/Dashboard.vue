@@ -3,7 +3,7 @@
     <v-card elevation="2" class="mb-4" rounded="lg">
       <v-card-item>
         <v-card-title class="text-h6">数据看板</v-card-title>
-        <v-card-subtitle>系统运营数据概览</v-card-subtitle>
+        <v-card-subtitle>系统运营数据概览与智能预警</v-card-subtitle>
       </v-card-item>
     </v-card>
 
@@ -53,19 +53,168 @@
         </v-card>
       </v-col>
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" rounded="lg" color="warning" theme="dark" class="stat-card">
+        <v-card
+          elevation="2"
+          rounded="lg"
+          :color="warningStats.total > 0 ? 'error' : 'warning'"
+          theme="dark"
+          class="stat-card"
+          @click="scrollToWarnings"
+          style="cursor: pointer"
+        >
           <v-card-text>
             <div class="d-flex align-center justify-space-between">
               <div>
-                <div class="text-caption text-opacity-75">花材总数量</div>
-                <div class="text-h4 font-weight-bold mt-2">{{ summary.total_flower_quantity }} 枝</div>
+                <div class="text-caption text-opacity-75">待处理预警</div>
+                <div class="text-h4 font-weight-bold mt-2">
+                  {{ warningStats.total }}
+                </div>
               </div>
-              <v-icon size="48" class="text-white text-opacity-50">mdi-numeric</v-icon>
+              <v-badge color="white" :content="warningStats.high" offset-x="-4" offset-y="4">
+                <v-icon size="48" class="text-white text-opacity-50">mdi-alert</v-icon>
+              </v-badge>
             </div>
           </v-card-text>
         </v-card>
       </v-col>
     </v-row>
+
+    <!-- 预警区域 -->
+    <v-card elevation="2" class="mb-4" rounded="lg" ref="warningsCard">
+      <v-card-item>
+        <div class="d-flex align-center justify-space-between flex-wrap" style="gap: 12px">
+          <div>
+            <v-card-title class="text-subtitle-1">
+              <v-icon start color="error">mdi-alert-circle</v-icon>
+              待处理预警列表
+            </v-card-title>
+            <v-card-subtitle>
+              液位过低、花材萎蔫、入桶超时、损耗过高自动预警
+            </v-card-subtitle>
+          </div>
+          <div class="d-flex align-center" style="gap: 8px">
+            <v-chip
+              v-for="stat in [
+                { key: 'total', label: '全部', color: 'primary' },
+                { key: 'low_liquid', label: '液位低', color: 'info' },
+                { key: 'wilted', label: '萎蔫', color: 'error' },
+                { key: 'long_in_bucket', label: '超时', color: 'warning' },
+                { key: 'high_loss', label: '高损耗', color: 'deep-orange' },
+              ]"
+              :key="stat.key"
+              size="small"
+              variant="tonal"
+              :color="warningFilter === stat.key ? stat.color : 'default'"
+              @click="warningFilter = warningFilter === stat.key ? '' : stat.key"
+              style="cursor: pointer"
+            >
+              {{ stat.label }}
+              <span class="ms-1 font-weight-bold">({{ warningStats[stat.key] || 0 }})</span>
+            </v-chip>
+            <v-btn variant="text" size="small" @click="loadWarnings">
+              <v-icon start>mdi-refresh</v-icon>刷新
+            </v-btn>
+            <router-link to="/trace">
+              <v-btn variant="outlined" size="small" color="primary">
+                <v-icon start>mdi-history</v-icon>轨迹追踪
+              </v-btn>
+            </router-link>
+          </div>
+        </div>
+      </v-card-item>
+      <v-divider />
+      <v-table>
+        <thead>
+          <tr>
+            <th>级别</th>
+            <th>类型</th>
+            <th>门店</th>
+            <th>花桶</th>
+            <th>花材</th>
+            <th>预警信息</th>
+            <th>当前值 / 阈值</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="w in filteredWarnings" :key="w.warning_id">
+            <td>
+              <v-chip
+                size="small"
+                :color="w.severity === 'high' ? 'error' : w.severity === 'medium' ? 'warning' : 'info'"
+                variant="flat"
+                theme="dark"
+              >
+                {{ w.severity === 'high' ? '严重' : w.severity === 'medium' ? '中等' : '提示' }}
+              </v-chip>
+            </td>
+            <td>
+              <v-chip
+                size="small"
+                variant="tonal"
+                :color="warningTypeColor[w.warning_type]"
+              >
+                <v-icon start size="14">
+                  {{ warningTypeIcon[w.warning_type] }}
+                </v-icon>
+                {{ w.warning_type_label }}
+              </v-chip>
+            </td>
+            <td>{{ w.store_name || '-' }}</td>
+            <td>{{ w.bucket_code || '-' }}</td>
+            <td>
+              <span v-if="w.flower_name">
+                {{ w.flower_name }}
+                <span class="text-caption text-medium-emphasis">({{ w.flower_code }})</span>
+              </span>
+              <span v-else>-</span>
+            </td>
+            <td class="font-weight-medium">{{ w.message }}</td>
+            <td>
+              <span :class="w.severity === 'high' ? 'text-error' : 'text-warning'">
+                {{ w.current_value }}{{ w.unit }}
+              </span>
+              <span class="text-medium-emphasis"> / {{ w.threshold }}{{ w.unit }}</span>
+            </td>
+            <td class="text-center">
+              <v-btn
+                v-if="w.warning_type === 'low_liquid'"
+                variant="text"
+                size="small"
+                color="primary"
+                :to="`/records?bucket_id=${w.bucket_id}&tab=preservation`"
+              >
+                去补液
+              </v-btn>
+              <v-btn
+                v-else-if="w.warning_type === 'wilted' || w.warning_type === 'long_in_bucket'"
+                variant="text"
+                size="small"
+                color="primary"
+                :to="`/flowers?flower_id=${w.flower_id}`"
+              >
+                查看花材
+              </v-btn>
+              <v-btn
+                v-else-if="w.warning_type === 'high_loss'"
+                variant="text"
+                size="small"
+                color="primary"
+                :to="`/trace?store_id=${w.store_id}`"
+              >
+                查看损耗
+              </v-btn>
+            </td>
+          </tr>
+          <tr v-if="filteredWarnings.length === 0">
+            <td colspan="8" class="text-center text-medium-emphasis py-8">
+              <v-icon size="32" class="mb-2">mdi-check-circle</v-icon>
+              <div>暂无待处理预警</div>
+            </td>
+          </tr>
+        </tbody>
+      </v-table>
+    </v-card>
 
     <!-- 图表区域 -->
     <v-row>
@@ -179,8 +328,17 @@
       <v-col cols="12" lg="6">
         <v-card elevation="2" rounded="lg">
           <v-card-item>
-            <v-card-title class="text-subtitle-1">最近操作记录</v-card-title>
-            <v-card-subtitle>最新动态</v-card-subtitle>
+            <div class="d-flex align-center justify-space-between">
+              <div>
+                <v-card-title class="text-subtitle-1">最近操作记录</v-card-title>
+                <v-card-subtitle>最新动态</v-card-subtitle>
+              </div>
+              <router-link to="/trace">
+                <v-btn variant="text" size="small" color="primary">
+                  查看全部 <v-icon end>mdi-arrow-right</v-icon>
+                </v-btn>
+              </router-link>
+            </div>
           </v-card-item>
           <v-divider />
           <v-table>
@@ -231,6 +389,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, Title } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
 import { dashboardApi, type DashboardSummary, type BucketTurnover, type CategoryDistribution, type StoreLossRanking, type RecentRecord } from '@/api/dashboard'
+import type { Warning, WarningType, WarningSeverity } from '@/types'
 import dayjs from 'dayjs'
 
 ChartJS.register(ArcElement, Tooltip, Legend, Title)
@@ -251,7 +410,50 @@ const categoryData = ref<CategoryDistribution[]>([])
 const lossRanking = ref<StoreLossRanking[]>([])
 const recentRecords = ref<RecentRecord[]>([])
 
+const warnings = ref<Warning[]>([])
+const warningFilter = ref('')
+const warningsCard = ref()
+
+const warningStats = computed(() => {
+  const stats: Record<string, number> = {
+    total: warnings.value.length,
+    high: 0,
+    medium: 0,
+    low: 0,
+    low_liquid: 0,
+    wilted: 0,
+    long_in_bucket: 0,
+    high_loss: 0,
+  }
+  for (const w of warnings.value) {
+    stats[w.severity] = (stats[w.severity] || 0) + 1
+    stats[w.warning_type] = (stats[w.warning_type] || 0) + 1
+  }
+  return stats
+})
+
+const filteredWarnings = computed(() => {
+  if (!warningFilter.value || warningFilter.value === 'total') {
+    return warnings.value
+  }
+  return warnings.value.filter(w => w.warning_type === warningFilter.value)
+})
+
 const topTurnover = computed(() => turnoverData.value.slice(0, 10))
+
+const warningTypeColor: Record<WarningType, string> = {
+  low_liquid: 'info',
+  wilted: 'error',
+  long_in_bucket: 'warning',
+  high_loss: 'deep-orange',
+}
+
+const warningTypeIcon: Record<WarningType, string> = {
+  low_liquid: 'mdi-water-off',
+  wilted: 'mdi-flower-tulip',
+  long_in_bucket: 'mdi-clock-alert',
+  high_loss: 'mdi-trending-down',
+}
 
 const recordColor: Record<string, string> = {
   in_bucket: 'primary',
@@ -306,6 +508,16 @@ function formatDate(d: string) {
   return dayjs(d).format('MM-DD HH:mm')
 }
 
+function scrollToWarnings() {
+  warningsCard.value?.scrollIntoView({ behavior: 'smooth' })
+}
+
+async function loadWarnings() {
+  try {
+    warnings.value = await dashboardApi.warnings()
+  } catch {}
+}
+
 async function loadAll() {
   try {
     const [s, t, c, l, r] = await Promise.all([
@@ -323,7 +535,10 @@ async function loadAll() {
   } catch {}
 }
 
-onMounted(loadAll)
+onMounted(async () => {
+  await loadAll()
+  await loadWarnings()
+})
 </script>
 
 <style lang="scss" scoped>
